@@ -3,6 +3,7 @@ import glob
 import os
 import numpy as np
 from sklearn.model_selection import train_test_split
+import torch
 
 IMAGE_SHAPE = (300, 300, 2)  # (H, W, C) for each single projection
 
@@ -110,4 +111,45 @@ def split_files(input_files, target_files, validation_split=0.2, seed=42):
     val_input, val_target = map(list, zip(*val_pairs))
 
     return train_input, train_target, val_input, val_target
+
+
+def load_as_tensor(path):
+    
+    """
+    A helper function for "collate_batch", it loads .npy file and convert it into a PyTorch tensor. 
+
+    Args:
+        path: Path to a .npy file containing an (H, W, C) array.
+
+    Returns:
+        A (C, H, W) float32 torch.Tensor.
+    """
+    
+    array_data = np.load(path).astype(np.float32)
+    tensor_data = torch.from_numpy(array_data).permute(2, 0, 1)
+    # (H, W, C) -> (C, H, W), PyTorch expects the format that channel is first index
+
+    return tensor_data
+
+
+def collate_batch(path_pairs):
+
+    """
+    Read a batch of projection pairs in tensor and stack them together.
+
+    This is the collate function (collate_fn) of the DataLoader.
+    The DataLoader selects the (input_path, target_path) pairs of the batch 
+    and gives them to this function, which reads the files.
+
+    Args:
+        path_pairs: List of (input_path, target_path) tuples.
+
+    Returns:
+        inputs, targets: Tensors of shape (B, C, H, W).
+    """
+
+
+    inputs = torch.stack([load_as_tensor(input_path) for input_path, _ in path_pairs])
+    targets = torch.stack([load_as_tensor(target_path) for _, target_path in path_pairs])
+    return inputs, targets
 
