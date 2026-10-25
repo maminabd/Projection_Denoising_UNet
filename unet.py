@@ -161,4 +161,7 @@ class UNet(nn.Module):
         output = self.pre_final_relu(output)
         output = self.final_conv(output)
 
+        # Projection intensities are non-negative
+        output = torch.clamp(output, min=0)
+
         return output
