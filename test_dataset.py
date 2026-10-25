@@ -2,7 +2,8 @@
 import os
 import numpy as np
 import pytest
-from dataset import (check_files, find_paired_files, split_files)
+from dataset import (check_files, find_paired_files, split_files, collate_batch)
+import torch
 
 IMAGE_SHAPE = (300, 300, 2)  # (H, W, C) for each single projection
 
@@ -234,3 +235,58 @@ def test_split_files_deterministic_with_seed():
 
     assert split_files_1 == split_files_2, "Same seed should produce the same train/validation split"
 
+
+def test_collate_batch_stacks_pairs(tmp_path):
+    """
+    GIVEN: a list of (input_path, target_path) pairs
+    WHEN: collate_batch is called
+    THEN: the inputs and the targets are stacked into (B, C, H, W) tensors (B: batch size)
+    """
+    
+    # create directories and files
+    input_dir =  tmp_path / "input"
+    target_dir = tmp_path / "target"
+    input_dir.mkdir()
+    target_dir.mkdir()
+    
+    pairs = []
+    batch_size = 8
+    for i in range(batch_size):
+        inp_file = input_dir / f"mouse_{i}.npy"
+        np.save(inp_file, np.full(IMAGE_SHAPE, 0.5, dtype=np.float32))
+        tg_file = target_dir / f"mouse_{i}.npy"
+        np.save(tg_file, np.full(IMAGE_SHAPE, 0.5, dtype=np.float32))
+        pairs.append((inp_file, tg_file))
+        
+    inputs, targets = collate_batch(pairs)
+    
+    assert isinstance(inputs, torch.Tensor), "collate_batch should return a torch.Tensor"
+    assert isinstance(targets, torch.Tensor), "collate_batch should return a torch.Tensor"
+    assert inputs.shape == (8, 2, 300, 300), f"Unexpected inputs shape: {tuple(inputs.shape)}"
+    assert targets.shape == (8, 2, 300, 300), f"Unexpected targets shape: {tuple(targets.shape)}"
+    
+    
+def test_collate_batch_casts_to_float32(tmp_path):
+    """
+    GIVEN: .npy files in float 16 and float64
+    WHEN: load_projection is called
+    THEN: the returned tensor is float32, as the model expects
+    """
+    
+    # create directories and files
+    input_dir =  tmp_path / "input"
+    target_dir = tmp_path / "target"
+    input_dir.mkdir()
+    target_dir.mkdir()
+    
+    pairs = []
+    path_inp = input_dir / "mouse_1.npy"
+    np.save(path_inp, np.full(IMAGE_SHAPE, 0.5, dtype=np.float16))
+    path_tg = target_dir / "mouse_1.npy"
+    np.save(path_tg, np.full(IMAGE_SHAPE, 0.5, dtype=np.float64))
+    pairs.append((path_inp, path_tg))
+
+    inputs, targets = collate_batch(pairs)
+
+    assert inputs.dtype == torch.float32, f"Expected float32, got {inputs.dtype}"
+    assert targets.dtype == torch.float32, f"Expected float32, got {targets.dtype}"
