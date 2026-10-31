@@ -6,12 +6,13 @@ from torch.utils.data import DataLoader
 from dataset import (check_files, find_paired_files, split_files, collate_batch)
 import torch.nn.functional as F
 from unet import UNet
+from utils import (save_checkpoint, get_device, plot_history)
 
 # hyperparameters and data paths
 input_path = "./input"
 target_path = "./target"
-epochs = 4
-save_model_every = 2
+epochs = 25
+save_model_every = 5
 batch_size = 8
 VAL_SPLIT = 0.2 # fraction of the files used for validation
 SEED = 42
@@ -19,24 +20,7 @@ NUM_WORKERS = 4 # number of subprocesses used to load and preprocess data in par
 LEARNING_RATE = 1e-4
 T_0, T_MULT, ETA_MIN = 100, 2, 1e-7  # hyperparameters of CosineAnnealingWarmRestarts scheduler
 
-def save_checkpoint(path, model, optimizer, scheduler, epoch, **extra):
-    """
-    Save model, optimizer and scheduler states plus any extra information.
 
-    Args:
-        path: output .pth file.
-        model, optimizer, scheduler: Objects whose state_dict is saved.
-        epoch: index (0-based) of the last completed epoch.
-        **extra: additional entries stored in the checkpoint (losses, config...).
-    """
-    checkpoint = {
-        'epoch': epoch,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-        'scheduler_state_dict': scheduler.state_dict(),
-    }
-    checkpoint.update(extra)
-    torch.save(checkpoint, path)
 
 def make_loader(input_files, target_files, batch_size, shuffle, device):
     """
@@ -107,7 +91,8 @@ def run_epoch(model, loader, device, optimizer=None):
 
 def main():
 
-    device = torch.device('cuda')
+    
+    device = get_device()
 
     log_file = "log.txt"
     plot_file = "loss_history.png"
@@ -135,17 +120,23 @@ def main():
     scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=T_0, T_mult=T_MULT, eta_min=ETA_MIN)
 
     # Training loop
-    train_history, val_history = [], []
+    train_history, val_history, lr_history = [], [], []
     print("Start Training ... ", file=open(log_file, 'w', encoding='utf-8'))
     for epoch in range(0, epochs):
 
         train_losses = run_epoch(model, train_loader, device, optimizer)
         val_losses = run_epoch(model, val_loader, device) # No optimization during validating.
 
+        # Update the learning rate scheduler
         scheduler.step()
-
+        
+        # Extract the updated learning rate from the optimizer for tracking history
+        current_lr = optimizer.param_groups[0]['lr']
+        
+        # save the histories for plotting 
         train_history.append(train_losses)
         val_history.append(val_losses)
+        lr_history.append(current_lr)
 
         if (epoch+1) % save_model_every == 0:
             save_checkpoint(f"UNet_epoch_{epoch+1:03d}.pth", model, optimizer, scheduler, epoch, train_loss=train_losses, val_loss=val_losses)
@@ -155,6 +146,10 @@ def main():
 
         print(message, flush=True)
         print(message, file=open(log_file, 'a', encoding='utf-8'))
+    
+    # once the training finished, save the plot from trends of training loss and validation loss values wrt epochs and ...
+    # plot the learning rate schedule wrt epochs
+    plot_history(train_history, val_history, lr_history, plot_file)
 
     print("\n\n Training completed \n\n")
 

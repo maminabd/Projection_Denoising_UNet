@@ -30,9 +30,13 @@ MANIFEST
 input/
 target/
 
+# IDE - VS Code
+.vscode/
+
 # trained model and result
 *.pth
 *.txt
+*.png
 
 # PyInstaller
 #   Usually these files are written by a python script from a template
