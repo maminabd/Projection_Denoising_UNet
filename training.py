@@ -7,19 +7,25 @@ from dataset import (check_files, find_paired_files, split_files, collate_batch)
 import torch.nn.functional as F
 from unet import UNet
 from utils import (save_checkpoint, get_device, plot_history)
+import argparse
 
 # hyperparameters and data paths
-input_path = "./input"
-target_path = "./target"
-epochs = 25
-save_model_every = 5
-batch_size = 8
 VAL_SPLIT = 0.2 # fraction of the files used for validation
 SEED = 42
 NUM_WORKERS = 4 # number of subprocesses used to load and preprocess data in parallel with training
 LEARNING_RATE = 1e-4
 T_0, T_MULT, ETA_MIN = 100, 2, 1e-7  # hyperparameters of CosineAnnealingWarmRestarts scheduler
 
+def parse_args():
+    """Command-line arguments: the options that change from one run to the next."""
+    parser = argparse.ArgumentParser(description="Train the U-Net projection denoiser")
+    parser.add_argument('--input', required=True, help="Directory with the noisy input .npy files")
+    parser.add_argument('--target', required=True, help="Directory with the clean target .npy files")
+    parser.add_argument('--epochs', type=int, default=25, help="Number of training epochs")
+    parser.add_argument('--batch', type=int, default=8, help="Batch size")
+    parser.add_argument('--save_model_every', type=int, default=5, help="Save a checkpoint every N epochs")
+    return parser.parse_args()
+               
 
 
 def make_loader(input_files, target_files, batch_size, shuffle, device):
@@ -90,15 +96,16 @@ def run_epoch(model, loader, device, optimizer=None):
 
 
 def main():
-
     
+    args = parse_args()
+
     device = get_device()
 
     log_file = "log.txt"
     plot_file = "loss_history.png"
 
     # Data processing
-    input_files, target_files = find_paired_files(input_path, target_path)
+    input_files, target_files = find_paired_files(args.input, args.target)
 
     # check if the datasets are acceptable
     check_files(input_files, target_files)
@@ -107,8 +114,8 @@ def main():
     train_in, train_tg, val_in, val_tg = split_files(input_files, target_files, VAL_SPLIT, SEED)
 
     # create data loader for training and validation dataset with a batch_size
-    train_loader = make_loader(train_in, train_tg, batch_size, shuffle=True, device=device)
-    val_loader = make_loader(val_in, val_tg, batch_size, shuffle=False, device=device)
+    train_loader = make_loader(train_in, train_tg, args.batch, shuffle=True, device=device)
+    val_loader = make_loader(val_in, val_tg, args.batch, shuffle=False, device=device)
 
     print(f"Training on {len(train_in)} projections, validating on {len(val_in)}")
 
@@ -122,7 +129,7 @@ def main():
     # Training loop
     train_history, val_history, lr_history = [], [], []
     print("Start Training ... ", file=open(log_file, 'w', encoding='utf-8'))
-    for epoch in range(0, epochs):
+    for epoch in range(0, args.epochs):
 
         train_losses = run_epoch(model, train_loader, device, optimizer)
         val_losses = run_epoch(model, val_loader, device) # No optimization during validating.
@@ -138,10 +145,10 @@ def main():
         val_history.append(val_losses)
         lr_history.append(current_lr)
 
-        if (epoch+1) % save_model_every == 0:
+        if (epoch+1) % args.save_model_every == 0:
             save_checkpoint(f"UNet_epoch_{epoch+1:03d}.pth", model, optimizer, scheduler, epoch, train_loss=train_losses, val_loss=val_losses)
 
-        message = (f"\n Epoch {epoch+1}/{epochs}:"
+        message = (f"\n Epoch {epoch+1}/{args.epochs}:"
                    f"  Train loss: {train_losses:.6f}, validation loss: {val_losses:.6f}\n")
 
         print(message, flush=True)
