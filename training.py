@@ -15,6 +15,7 @@ SEED = 42
 NUM_WORKERS = 4 # number of subprocesses used to load and preprocess data in parallel with training
 LEARNING_RATE = 1e-4
 T_0, T_MULT, ETA_MIN = 100, 2, 1e-7  # hyperparameters of CosineAnnealingWarmRestarts scheduler
+IMAGE_SHAPE = (300, 300, 2)  # (H, W, C) for each single projection
 
 def parse_args():
     """Command-line arguments: the options that change from one run to the next."""
@@ -117,8 +118,6 @@ def main():
     train_loader = make_loader(train_in, train_tg, args.batch, shuffle=True, device=device)
     val_loader = make_loader(val_in, val_tg, args.batch, shuffle=False, device=device)
 
-    print(f"Training on {len(train_in)} projections, validating on {len(val_in)}")
-
     # Model, optimizer, scheduler
     model = UNet(in_channels=2, out_channels=2).to(device)
 
@@ -128,7 +127,26 @@ def main():
 
     # Training loop
     train_history, val_history, lr_history = [], [], []
-    print("Start Training ... ", file=open(log_file, 'w', encoding='utf-8'))
+    header_message = (
+    "\nHyperparameters and training settings:\n"
+
+    f"Validation split fraction: {VAL_SPLIT}\n"
+    f"  Number of Training projections: {len(train_in)}\n" 
+    f"  Number of validation projections: {len(val_in)}\n"
+    f"Batch size: {args.batch}, number of epochs: {args.epochs}\n"
+    f"Save the model after each: {args.save_model_every} epochs\n"
+    f"Scheduler: CosineAnnealingWarmRestarts. Parameters:\n"
+    f"  initial lr: {LEARNING_RATE}, \n"
+    f"  T_0: {T_0}, \n"
+    f"  T_mult: {T_MULT}, \n"
+    f"  eta_min: {ETA_MIN}\n"
+
+    "\nStart Training ...\n"
+    )
+    
+    print(header_message, flush=True)
+    # recreate the log file and write the header message to it
+    print(header_message, file=open(log_file, mode='w', encoding='utf-8'))
     for epoch in range(0, args.epochs):
 
         train_losses = run_epoch(model, train_loader, device, optimizer)
@@ -152,13 +170,22 @@ def main():
                    f"  Train loss: {train_losses:.6f}, validation loss: {val_losses:.6f}\n")
 
         print(message, flush=True)
-        print(message, file=open(log_file, 'a', encoding='utf-8'))
+        # append the message to the log file
+        print(message, file=open(log_file, mode='a', encoding='utf-8'))
     
     # once the training finished, save the plot from trends of training loss and validation loss values wrt epochs and ...
     # plot the learning rate schedule wrt epochs
     plot_history(train_history, val_history, lr_history, plot_file)
 
-    print("\n\n Training completed \n\n")
+    ending_message = (
+        f"\nTraining finished after {args.epochs} epochs.\n"
+        # print the last training and validation loss values from the loss history lists
+        f"Final training loss: {train_history[-1]:.6f}, final validation loss: {val_history[-1]:.6f}\n"
+        f"Training history plot saved to '{plot_file}'\n"
+    )
+    print(ending_message, flush=True)
+    # append the ending message to the log file
+    print(ending_message, file=open(log_file, mode='a', encoding='utf-8'))
 
 
 if __name__ == '__main__':

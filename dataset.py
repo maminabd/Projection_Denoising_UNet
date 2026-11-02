@@ -63,7 +63,7 @@ def find_paired_files(input_dir, target_dir, pattern="*.npy"):
     input_files = sorted(glob.glob(os.path.join(input_dir, pattern)))
     target_files = sorted(glob.glob(os.path.join(target_dir, pattern)))
 
-    print(f"Found {len(input_files)} input files")
+    print(f"\nFound {len(input_files)} input files")
     print(f"Found {len(target_files)} target files")
 
     if len(input_files) == 0:
