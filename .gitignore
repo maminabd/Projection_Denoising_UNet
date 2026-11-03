@@ -36,6 +36,7 @@ target/
 # trained model and result
 *.pth
 *.txt
+!requirements.txt
 *.png
 
 # PyInstaller
