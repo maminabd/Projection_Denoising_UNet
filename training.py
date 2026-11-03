@@ -1,4 +1,5 @@
 
+import os
 import numpy as np
 import torch
 import torch.optim as optim
@@ -6,7 +7,7 @@ from torch.utils.data import DataLoader
 from dataset import (check_files, find_paired_files, split_files, collate_batch)
 import torch.nn.functional as F
 from unet import UNet
-from utils import (save_checkpoint, get_device, plot_history)
+from utils import (save_checkpoint, get_device, plot_history, load_checkpoint)
 import argparse
 
 # hyperparameters and data paths
@@ -25,6 +26,8 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=25, help="Number of training epochs")
     parser.add_argument('--batch', type=int, default=8, help="Batch size")
     parser.add_argument('--save_model_every', type=int, default=5, help="Save a checkpoint every N epochs")
+    parser.add_argument('--resume', default=None, help="Checkpoint (.pth) to continue training from")
+                                                                                                    
     return parser.parse_args()
                
 
@@ -124,7 +127,29 @@ def main():
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
 
     scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=T_0, T_mult=T_MULT, eta_min=ETA_MIN)
+    
+    start_epoch = 0
+    best_val_loss = float('inf')
+    # Resume training from a checkpoint if provided
+    if args.resume:
+        if os.path.exists(args.resume):
+            checkpointed_epoch, checkpointed_val_loss = load_checkpoint(args.resume, model, optimizer, scheduler, device)
+            
+            start_epoch = checkpointed_epoch + 1 # start from the next epoch after the checkpointed epoch.
+            best_val_loss = checkpointed_val_loss # the last validation loss stored in the checkpoint is used as a reference for the best validation loss so far.
 
+            message_resuming= (f"Continuing from checkpoint {args.resume}, "
+                f"at epoch {start_epoch}, best validation loss {best_val_loss:.6f}")
+
+            print(message_resuming, flush=True)
+            # append the resuming message to the log file
+            print(message_resuming, file=open(log_file, mode='w', encoding='utf-8'))
+
+        
+        else:
+            raise FileNotFoundError(f"Checkpoint '{args.resume}' not found")
+
+                                                                                                      
     # Training loop
     train_history, val_history, lr_history = [], [], []
     header_message = (
@@ -147,10 +172,11 @@ def main():
     print(header_message, flush=True)
     # recreate the log file and write the header message to it
     print(header_message, file=open(log_file, mode='w', encoding='utf-8'))
-    for epoch in range(0, args.epochs):
 
-        train_losses = run_epoch(model, train_loader, device, optimizer)
-        val_losses = run_epoch(model, val_loader, device) # No optimization during validating.
+    for epoch in range(start_epoch, args.epochs):
+
+        train_loss = run_epoch(model, train_loader, device, optimizer)
+        val_loss = run_epoch(model, val_loader, device) # No optimization during validating.
 
         # Update the learning rate scheduler
         scheduler.step()
@@ -159,15 +185,23 @@ def main():
         current_lr = optimizer.param_groups[0]['lr']
         
         # save the histories for plotting 
-        train_history.append(train_losses)
-        val_history.append(val_losses)
+        train_history.append(train_loss)
+        val_history.append(val_loss)
         lr_history.append(current_lr)
 
+
+        # The best model is the one with the lowest validation loss
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            save_checkpoint(f"UNet_best.pth", model, optimizer, scheduler, epoch,
+                            train_loss=train_loss, val_loss=val_loss)
+
+
         if (epoch+1) % args.save_model_every == 0:
-            save_checkpoint(f"UNet_epoch_{epoch+1:03d}.pth", model, optimizer, scheduler, epoch, train_loss=train_losses, val_loss=val_losses)
+            save_checkpoint(f"UNet_epoch_{epoch+1:03d}.pth", model, optimizer, scheduler, epoch, train_loss=train_loss, val_loss=val_loss)
 
         message = (f"\n Epoch {epoch+1}/{args.epochs}:"
-                   f"  Train loss: {train_losses:.6f}, validation loss: {val_losses:.6f}\n")
+                   f"  Train loss: {train_loss:.6f}, validation loss: {val_loss:.6f}\n")
 
         print(message, flush=True)
         # append the message to the log file
