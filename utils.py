@@ -76,10 +76,43 @@ def save_checkpoint(path, model, optimizer, scheduler, epoch, **extra):
         **extra: additional entries stored in the checkpoint (losses, config...).
     """
     checkpoint = {
-        'epoch': epoch,
+        'checkpointed_epoch': epoch,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'scheduler_state_dict': scheduler.state_dict(),
     }
     checkpoint.update(extra)
     torch.save(checkpoint, path)
+
+def load_checkpoint(path, model, optimizer, scheduler, device):
+    
+    """
+    Restore the model, optimizer and scheduler states from a checkpoint.
+
+    Args:
+        path: Checkpoint (.pth) file path written by save_checkpoint function.
+        model, optimizer, scheduler: Objects whose state is restored in place.
+        device: Device the checkpoint tensors are loaded onto (CPU or GPU).
+
+    Returns:
+        Tuple of (checkpointed_epoch, checkpointed_val_loss): respectively are:
+            -the epoch to resume from after loading the checkpoint.
+            -the validation loss stored in the checkpoint which act as a reference for the best validation loss so far.
+    """
+
+    # loads a checkpoint (weights_only=True: the checkpoint only holds tensors and numbers)
+    checkpoint = torch.load(path, map_location=device, weights_only=True)
+
+    # take the parameters of the saved model from the dictionary 
+    model_param = checkpoint['model_state_dict']
+    optimizer_param = checkpoint['optimizer_state_dict']
+    scheduler_param = checkpoint['scheduler_state_dict']
+    checkpointed_epoch = checkpoint['checkpointed_epoch']
+    checkpointed_val_loss = checkpoint.get('val_loss') # .get() is used because 'val_loss' is stored by **extra.
+
+    # load those parameters into their corresponding objects.
+    model.load_state_dict(model_param)
+    optimizer.load_state_dict(optimizer_param)
+    scheduler.load_state_dict(scheduler_param)
+
+    return checkpointed_epoch, checkpointed_val_loss
