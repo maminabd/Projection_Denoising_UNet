@@ -2,7 +2,7 @@
 import os
 import numpy as np
 import pytest
-from dataset import (check_files, find_paired_files, split_files, collate_batch)
+from libs.dataset import (check_files, find_paired_files, split_files, collate_batch)
 import torch
 
 IMAGE_SHAPE = (300, 300, 2)  # (H, W, C) for each single projection. This is constant for this work.

@@ -1,6 +1,6 @@
 
 import torch
-from unet import ResBlock, UNet
+from libs.unet import ResBlock, UNet
 import torch.nn.functional as F
 
 def test_ResBlock_output_size():
