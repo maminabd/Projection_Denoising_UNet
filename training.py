@@ -15,7 +15,7 @@ VAL_SPLIT = 0.2 # fraction of the files used for validation
 SEED = 42
 NUM_WORKERS = 4 # number of subprocesses used to load and preprocess data in parallel with training
 LEARNING_RATE = 1e-4
-T_0, T_MULT, ETA_MIN = 100, 2, 1e-7  # hyperparameters of CosineAnnealingWarmRestarts scheduler
+T_0, T_MULT, ETA_MIN = 50, 2, 1e-7  # hyperparameters of CosineAnnealingWarmRestarts scheduler
 IMAGE_SHAPE = (300, 300, 2)  # (H, W, C) for each single projection
 
 def parse_args():
@@ -23,9 +23,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train the U-Net projection denoiser")
     parser.add_argument('--input', required=True, help="Directory with the noisy input .npy files")
     parser.add_argument('--target', required=True, help="Directory with the clean target .npy files")
-    parser.add_argument('--epochs', type=int, default=25, help="Number of training epochs")
+    parser.add_argument('--epochs', type=int, default=100, help="Number of training epochs")
     parser.add_argument('--batch', type=int, default=8, help="Batch size")
-    parser.add_argument('--save_model_every', type=int, default=5, help="Save a checkpoint every N epochs")
+    parser.add_argument('--save_model_every', type=int, default=25, help="Save a checkpoint every N epochs")
     parser.add_argument('--resume', default=None, help="Checkpoint (.pth) to continue training from")
                                                                                                     
     return parser.parse_args()
@@ -138,12 +138,12 @@ def main():
             start_epoch = checkpointed_epoch + 1 # start from the next epoch after the checkpointed epoch.
             best_val_loss = checkpointed_val_loss # the last validation loss stored in the checkpoint is used as a reference for the best validation loss so far.
 
-            message_resuming= (f"Continuing from checkpoint {args.resume}, "
+            message_resuming= (f"\n\nContinuing from checkpoint {args.resume}, "
                 f"at epoch {start_epoch}, best validation loss {best_val_loss:.6f}")
 
             print(message_resuming, flush=True)
             # append the resuming message to the log file
-            print(message_resuming, file=open(log_file, mode='w', encoding='utf-8'))
+            print(message_resuming, file=open(log_file, mode='a', encoding='utf-8'))
 
         
         else:
@@ -153,8 +153,7 @@ def main():
     # Training loop
     train_history, val_history, lr_history = [], [], []
     header_message = (
-    "\nHyperparameters and training settings:\n"
-
+    "\nHyperparameters and training settings:\n\n"
     f"Validation split fraction: {VAL_SPLIT}\n"
     f"  Number of Training projections: {len(train_in)}\n" 
     f"  Number of validation projections: {len(val_in)}\n"
@@ -170,8 +169,11 @@ def main():
     )
     
     print(header_message, flush=True)
-    # recreate the log file and write the header message to it
-    print(header_message, file=open(log_file, mode='w', encoding='utf-8'))
+
+    # recreate the log file and write the header message to it or ...
+    # append the header message to the existing log file if resuming from a checkpoint
+    if not args.resume:
+        print(header_message, file=open(log_file, mode='w', encoding='utf-8'))
 
     for epoch in range(start_epoch, args.epochs):
 
@@ -189,23 +191,31 @@ def main():
         val_history.append(val_loss)
         lr_history.append(current_lr)
 
+        epoch_message = (f"\nEpoch {epoch+1}/{args.epochs}:"
+                   f"  Train loss: {train_loss:.6f}, validation loss: {val_loss:.6f}, learning rate: {current_lr:.6e}\n")
+
+        print(epoch_message, flush=True)
+        # append the message to the log file
+        print(epoch_message, file=open(log_file, mode='a', encoding='utf-8'))
 
         # The best model is the one with the lowest validation loss
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             save_checkpoint(f"UNet_best.pth", model, optimizer, scheduler, epoch,
                             train_loss=train_loss, val_loss=val_loss)
-
+            
+            best_model_message = (f"checkpoint saved at epoch {epoch+1} with best validation loss: {best_val_loss:.6f} so far\n")
+            print(best_model_message, flush=True)
+            # append the message to the log file
+            print(best_model_message, file=open(log_file, mode='a', encoding='utf-8'))
 
         if (epoch+1) % args.save_model_every == 0:
-            save_checkpoint(f"UNet_epoch_{epoch+1:03d}.pth", model, optimizer, scheduler, epoch, train_loss=train_loss, val_loss=val_loss)
-
-        message = (f"\n Epoch {epoch+1}/{args.epochs}:"
-                   f"  Train loss: {train_loss:.6f}, validation loss: {val_loss:.6f}\n")
-
-        print(message, flush=True)
-        # append the message to the log file
-        print(message, file=open(log_file, mode='a', encoding='utf-8'))
+                    save_checkpoint(f"UNet_epoch_{epoch+1:03d}.pth", model, optimizer, scheduler, epoch, train_loss=train_loss, val_loss=val_loss)
+                    
+                    save_model_message = (f"Checkpoint saved at epoch {epoch+1}\n")
+                    print(save_model_message, flush=True)
+                    # append the message to the log file
+                    print(save_model_message, file=open(log_file, mode='a', encoding='utf-8'))
     
     # once the training finished, save the plot from trends of training loss and validation loss values wrt epochs and ...
     # plot the learning rate schedule wrt epochs
@@ -219,7 +229,7 @@ def main():
     )
     print(ending_message, flush=True)
     # append the ending message to the log file
-    print(ending_message, file=open(log_file, mode='a', encoding='utf-8'))
+    print(ending_message, file=open(log_file, mode='a' if args.resume else 'w', encoding='utf-8'))
 
 
 if __name__ == '__main__':
