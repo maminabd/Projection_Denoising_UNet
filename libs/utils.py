@@ -65,6 +65,68 @@ def plot_history(train_losses, val_losses, learning_rates, filename):
     plt.close(fig)
 
 
+def projs_comaprison(denoised, ground_truth, filename, title):
+    """
+    Save a picture comparing the denoised projection with the ground truth.
+
+    The picture has 2 rows and 3 columns. Each row corresponds to a channel (LE, HE).
+    The first column shows the denoised projection,
+    The second column shows the ground truth (noiseless projection),
+    The third column shows the absolute difference map between the denoised projection and the ground truth.
+
+    Args:
+        denoised: Tensor of shape (C, H, W).
+        ground_truth: Tensor of shape (C, H, W).
+        filename: Output picture file.
+        title: Title of the whole picture.
+
+    Returns:
+        List with the mean absolute difference of the 2 channel.
+    """
+    difference = (denoised - ground_truth).abs()
+
+    # averages over the last two dimensions i.e. H and W of tensor of shape (C, H, W)
+    mean_differences_tensor = difference.mean(dim=(1, 2))
+
+    # converts that tensor to a Python list i.e. [mean_LE, mean_HE]
+    mean_differences = mean_differences_tensor.tolist()
+
+    fig, axes = plt.subplots(2, 3, figsize=(18, 11), squeeze=False)
+
+    # --- Row 0: LE channel ---
+    im00 = axes[0, 0].imshow(denoised[0].numpy(), cmap='gray')
+    axes[0, 0].set_title("Denoised (LE)")
+    fig.colorbar(im00, ax=axes[0, 0], fraction=0.046, pad=0.04)
+
+    im01 = axes[0, 1].imshow(ground_truth[0].numpy(), cmap='gray')
+    axes[0, 1].set_title("Ground truth (LE)")
+    fig.colorbar(im01, ax=axes[0, 1], fraction=0.046, pad=0.04)
+
+    im02 = axes[0, 2].imshow(difference[0].numpy(), cmap='gray')
+    axes[0, 2].set_title(f"Absolute difference (LE), mean = {mean_differences[0]:.6f}")
+    fig.colorbar(im02, ax=axes[0, 2], fraction=0.046, pad=0.04)
+
+    # --- Row 1: HE channel ---
+    im10 = axes[1, 0].imshow(denoised[1].numpy(), cmap='gray')
+    axes[1, 0].set_title("Denoised (HE)")
+    fig.colorbar(im10, ax=axes[1, 0], fraction=0.046, pad=0.04)
+
+    im11 = axes[1, 1].imshow(ground_truth[1].numpy(), cmap='gray')
+    axes[1, 1].set_title("Ground truth (HE)")
+    fig.colorbar(im11, ax=axes[1, 1], fraction=0.046, pad=0.04)
+
+    im12 = axes[1, 2].imshow(difference[1].numpy(), cmap='gray')
+    axes[1, 2].set_title(f"Absolute difference (HE), mean = {mean_differences[1]:.6f}")
+    fig.colorbar(im12, ax=axes[1, 2], fraction=0.046, pad=0.04)
+
+    fig.suptitle(title)
+    fig.tight_layout()
+    fig.savefig(filename, dpi=100, bbox_inches='tight')
+    plt.close(fig)
+
+    return mean_differences
+
+
 def save_checkpoint(path, model, optimizer, scheduler, epoch, **extra):
     """
     Save model, optimizer and scheduler states plus any extra information.
