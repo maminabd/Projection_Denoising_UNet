@@ -65,7 +65,7 @@ def plot_history(train_losses, val_losses, learning_rates, filename):
     plt.close(fig)
 
 
-def projs_comaprison(denoised, ground_truth, filename, title):
+def projs_comparison(denoised, ground_truth, filename, title):
     """
     Save a picture comparing the denoised projection with the ground truth.
 

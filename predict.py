@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from libs.dataset import check_files, find_paired_files, load_as_tensor
 from libs.unet import UNet
-from libs.utils import get_device, projs_comaprison
+from libs.utils import get_device, projs_comparison
 
 IMAGE_SHAPE = (300, 300, 2)  # (H, W, C) for each single projection (C: channels, LE and HE projections)
 CHANNEL_NAMES = ('LE', 'HE')
@@ -84,7 +84,7 @@ def main():
         comparison_pic_name = os.path.join(args.output, f"{name}.png")
 
         # create the comparison picture and return the mean absolute differences
-        mean_differences = projs_comaprison(denoised, ground_truth, filename=comparison_pic_name, title=name)
+        mean_differences = projs_comparison(denoised, ground_truth, filename=comparison_pic_name, title=name)
 
         all_differences.append(mean_differences)
 
