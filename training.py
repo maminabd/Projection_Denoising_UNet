@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from libs.unet import UNet
 from libs.utils import (save_checkpoint, get_device, plot_history, load_checkpoint)
 import argparse
+from libs.losses import denoising_loss
 
 # hyperparameters and data paths
 VAL_SPLIT = 0.2 # fraction of the files used for validation
@@ -17,6 +18,7 @@ NUM_WORKERS = 4 # number of subprocesses used to load and preprocess data in par
 LEARNING_RATE = 1e-4
 T_0, T_MULT, ETA_MIN = 50, 2, 1e-7  # hyperparameters of CosineAnnealingWarmRestarts scheduler
 IMAGE_SHAPE = (300, 300, 2)  # (H, W, C) for each single projection
+MAE_WEIGHT, SSIM_WEIGHT, GRADIENT_WEIGHT = 0.5, 0.25, 0.25
 
 def parse_args():
     """Command-line arguments: the options that change from one run to the next."""
@@ -85,8 +87,9 @@ def run_epoch(model, loader, device, optimizer=None):
             targets = targets.to(device)
 
             outputs = model(inputs)
-
-            loss = F.l1_loss(outputs, targets) # loss function is mean absolute error
+            
+            # multi-component loss
+            loss = denoising_loss(outputs, targets, MAE_WEIGHT, SSIM_WEIGHT, GRADIENT_WEIGHT)
 
             if training:
                 optimizer.zero_grad()
