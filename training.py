@@ -10,6 +10,7 @@ from libs.unet import UNet
 from libs.utils import (save_checkpoint, get_device, plot_history, load_checkpoint)
 import argparse
 from libs.losses import denoising_loss
+import time
 
 # hyperparameters and data paths
 VAL_SPLIT = 0.2 # fraction of the files used for validation
@@ -180,6 +181,8 @@ def main():
 
     for epoch in range(start_epoch, args.epochs):
 
+        start_time = time.time()
+        
         train_loss = run_epoch(model, train_loader, device, optimizer)
         val_loss = run_epoch(model, val_loader, device) # No optimization during validating.
 
@@ -194,7 +197,7 @@ def main():
         val_history.append(val_loss)
         lr_history.append(current_lr)
 
-        epoch_message = (f"\nEpoch {epoch+1}/{args.epochs}:"
+        epoch_message = (f"\nEpoch {epoch+1}/{args.epochs}, ({time.time() - start_time:.1f} seconds):"
                    f"  Train loss: {train_loss:.6f}, validation loss: {val_loss:.6f}, learning rate: {current_lr:.6e}\n")
 
         print(epoch_message, flush=True)
