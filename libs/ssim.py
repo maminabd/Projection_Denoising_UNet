@@ -2,12 +2,6 @@
 import torch
 import torch.nn.functional as F
 
-# Stability constants of the original SSIM paper (K1 = 0.01, K2 = 0.03),
-# squared and for a data range of 1.
-C1 = 0.01 ** 2
-C2 = 0.03 ** 2
-
-
 def gaussian_window(window_size, sigma=1.5):
     """
     Build the normalized 2D Gaussian window that weights each neighbourhood.
@@ -53,6 +47,12 @@ def ssim_loss(pred, target, window_size=5, sigma=1.5):
     Returns:
         Scalar ssim loss
     """
+
+    # Stability constants from the original SSIM paper (K1 = 0.01, K2 = 0.03),
+    # squared and for a data range of [0, 1].
+    C1 = 0.01 ** 2
+    C2 = 0.03 ** 2
+
     height, width = pred.shape[2:]
 
     # Compare one channel at a time
