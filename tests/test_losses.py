@@ -1,6 +1,7 @@
 
 import torch
 from libs.losses import denoising_loss, gradient_loss
+from libs.ssim import gaussian_window, ssim_loss
 
 def test_gradient_loss_is_zero_for_identical_tensors():
     """
@@ -166,3 +167,78 @@ def test_gradient_loss_matches_handy_calculated_value():
     assert abs(grad_loss.item() - expected_loss) < 1e-6, (
         f"gradient_loss should GIVE the handy calculated value {expected_loss}, got {grad_loss.item()}"
     )
+
+# =================================================
+# tests for ssim_loss and gaussian_window function
+# =================================================
+
+def test_gaussian_window_shape():
+    """
+    GIVEN: a window size and a sigma
+    WHEN: gaussian_window is called
+    THEN: the window has shape (1, 1, K, K)
+    """
+    window = gaussian_window(window_size=7, sigma=1.5)
+
+    assert window.shape == (1, 1, 7, 7), f"Expected shape (1, 1, 7, 7), got {tuple(window.shape)}"
+
+def test_gaussian_window_shape_and_normalization():
+    """
+    GIVEN: a window size and a sigma
+    WHEN: gaussian_window is called
+    THEN: the window has sums to 1, so it computes a
+          weighted average
+    """
+    window = gaussian_window(window_size=7, sigma=1.5)
+
+    assert torch.isclose(window.sum(), torch.tensor(1.0), atol=1e-6), \
+        f"Expected the window to sum to 1, got {window.sum().item()}"
+
+def test_ssim_loss_gives_scalar_not_map():
+    """
+    GIVEN: two identical image batches
+    WHEN: ssim_loss is computed
+    THEN: the loss is ~0 (SSIM of an image with itself is 1)
+    """
+    torch.manual_seed(42)
+
+    prediction = torch.rand(4, 2, 300, 300)
+
+    target = torch.rand(4, 2, 300, 300)
+
+    ssim_loss_value = ssim_loss(prediction, target)
+
+    assert ssim_loss_value.dim() == 0, f"Expected a scalar loss, got shape {tuple(ssim_loss_value.shape)}"
+
+def test_ssim_loss_is_zero_for_identical_images():
+    """
+    GIVEN: two identical projection batches
+    WHEN: ssim_loss is computed
+    THEN: the loss is ~0 (SSIM of an projection with itself is 1)
+    """
+    torch.manual_seed(42)
+    projections = torch.rand(4, 2, 300, 300)
+
+    ssim_loss_value = ssim_loss(projections, projections)
+
+    assert torch.isclose(ssim_loss_value, torch.tensor(0.0), atol=1e-5), \
+        f"Expected ~0 for identical images, got {ssim_loss_value.item()}"
+
+def test_ssim_loss_swap_prediction_target():
+    """
+    GIVEN: two different images
+    WHEN: ssim_loss is computed in both orders
+    THEN: the ssim loss is the same regardless of order of entries 
+          because the SSIM formula is symmetric in its two entries.
+    """
+
+    torch.manual_seed(42)
+    prediction = torch.rand(1, 2, 24, 24)
+    
+    target = torch.rand(1, 2, 24, 24)
+
+    ssim_loss_value1 =ssim_loss(prediction, target)
+    ssim_loss_value2 = ssim_loss(target, prediction)
+
+    assert torch.isclose(ssim_loss_value1, ssim_loss_value2, atol=1e-6), \
+        "ssim_loss should not depend on the order of entries"
