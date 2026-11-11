@@ -26,7 +26,9 @@ def gaussian_window(window_size, sigma=1.5):
     # Reshape the window to (1, 1, window_size, window_size) for 2D convolution of a (B, C, H, W)
     window = window_2D.view(1, 1, window_size, window_size)
 
-    return window
+    window_normed = window / window.sum()
+
+    return window_normed
 
 
 def ssim_loss(pred, target, window_size=5, sigma=1.5):
