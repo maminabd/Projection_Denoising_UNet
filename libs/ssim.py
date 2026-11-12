@@ -41,6 +41,11 @@ def ssim_loss(pred, target, window_size=5, sigma=1.5):
         target: noiseless target projections, shape (B, C, H, W).
         window_size: Side length of the Gaussian window.
         sigma: Standard deviation of the Gaussian window.
+    
+
+    The data range (L) is computed as:
+        L = max(pred.max(), target.max()) - min(pred.min(), target.min())
+    it reflects the actual intensity values of pred/target
 
     The formula of ssim function is:
     SSIM(x, y) = (2 * mu_x * mu_y + C1) * (2 * sigma_xy + C2) / 
@@ -50,10 +55,17 @@ def ssim_loss(pred, target, window_size=5, sigma=1.5):
         Scalar ssim loss
     """
 
-    # Stability constants from the original SSIM paper (K1 = 0.01, K2 = 0.03),
-    # squared and for a data range of [0, 1].
-    C1 = 0.01 ** 2
-    C2 = 0.03 ** 2
+    # Stability constants from the original SSIM paper (K1 = 0.01, K2 = 0.03)
+    K1=0.01
+    K2=0.03
+
+    # Compute data range from min/max of both pred and target.
+    data_max = torch.max(pred.max(), target.max())
+    data_min = torch.min(pred.min(), target.min())
+    data_range = (data_max - data_min)
+        															  
+    C1 = (K1 * data_range) ** 2
+    C2 = (K2 * data_range) ** 2
 
     height, width = pred.shape[2:]
 
