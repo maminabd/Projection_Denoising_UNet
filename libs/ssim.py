@@ -62,7 +62,7 @@ def ssim_loss(pred, target, window_size=5, sigma=1.5):
     # Compute data range from min/max of both pred and target.
     data_max = torch.max(pred.max(), target.max())
     data_min = torch.min(pred.min(), target.min())
-    data_range = (data_max - data_min)
+    data_range = (data_max - data_min).clamp(min=1e-8)  # to avoid division by zero
         															  
     C1 = (K1 * data_range) ** 2
     C2 = (K2 * data_range) ** 2
