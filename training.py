@@ -4,13 +4,16 @@ import numpy as np
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from libs.dataset import (check_files, find_paired_files, split_files, collate_batch)
+from libs.dataset import (check_files, find_paired_files, 
+                          split_files, collate_batch, load_as_tensor)
 import torch.nn.functional as F
 from libs.unet import UNet
 from libs.utils import (save_checkpoint, get_device, plot_history, load_checkpoint)
 import argparse
 from libs.losses import denoising_loss
 import time
+from libs.data_augmentation import rotation_augmentation
+import random
 
 # hyperparameters and data paths
 VAL_SPLIT = 0.2 # fraction of the files used for validation
@@ -20,6 +23,11 @@ LEARNING_RATE = 1e-4
 T_0, T_MULT, ETA_MIN = 50, 2, 1e-7  # hyperparameters of CosineAnnealingWarmRestarts scheduler
 IMAGE_SHAPE = (300, 300, 2)  # (H, W, C) for each single projection
 MAE_WEIGHT, SSIM_WEIGHT, GRADIENT_WEIGHT = 0.5, 0.25, 0.25
+
+# Data Augmentation Configuration
+use_augmentation = True  # Enable/disable rotation augmentation
+rotation_probability = 0.5  # Probability of applying rotation to each training sample
+ROTATION_ANGLES = [1, 2, 3]  # degrees
 
 def parse_args():
     """Command-line arguments: the options that change from one run to the next."""
@@ -35,18 +43,54 @@ def parse_args():
                
 
 
-def make_loader(input_files, target_files, batch_size, shuffle, device):
+def collate_augmented_batch(path_pairs):
+    """
+    Read a batch of projection pairs in tensor, then augment (rotate) based on 
+    the data augmentation configuration and its random behavior, and finally 
+    stack them together and returns the batch of augmented projections.
+
+    Args:
+        path_pairs: list of (input_path, target_path) tuples.
+
+    Returns:
+        inputs, targets: tensors of shape (B, C, H, W).
+    """
+    inputs = torch.stack([load_as_tensor(input_path) for input_path, _ in path_pairs])
+    targets = torch.stack([load_as_tensor(target_path) for _, target_path in path_pairs])
+
+    augmented_inputs = []
+    augmented_targets = []
+
+    angle = random.choice(ROTATION_ANGLES)
+
+    for input_tensor, target_tensor in zip(inputs, targets):
+
+        if use_augmentation and random.random() < rotation_probability:
+            input_tensor, target_tensor = rotation_augmentation(input_tensor, target_tensor, angle)
+
+        augmented_inputs.append(input_tensor)
+        augmented_targets.append(target_tensor)
+
+        inputs = torch.stack(augmented_inputs)
+        targets = torch.stack(augmented_targets)
+        
+    return inputs, targets
+
+
+def make_loader(input_files, target_files, batch_size, shuffle, device, use_augmentation=False):
     """
     Build a DataLoader over the (input, target) file pairs.
 
     The DataLoader works directly on the list of path pairs and reads the
-    files through collate_batch
+    files through collate_batch (or collate_augmented_batch if use_augmentation is True)
 
     Args:
         input_files, target_files: lists of paired file paths.
         batch_size: number of projection files per batch.
         shuffle: whether to shuffle the pairs at every epoch.
         device: torch device.
+        use_augmentation: whether to augment (rotate) the projections by a probability 
+                          (for the training set only).
 
     Returns:
         The DataLoader.
@@ -54,8 +98,8 @@ def make_loader(input_files, target_files, batch_size, shuffle, device):
     path_pairs = list(zip(input_files, target_files))
 
     dataloader = DataLoader(path_pairs, batch_size=batch_size, shuffle=shuffle,
-                      collate_fn=collate_batch, num_workers=NUM_WORKERS,
-                      pin_memory=device.type == 'cuda')
+                      collate_fn=collate_augmented_batch if use_augmentation else collate_batch,
+                      num_workers=NUM_WORKERS, pin_memory=device.type == 'cuda')
 
     return dataloader
 
@@ -122,7 +166,8 @@ def main():
     train_in, train_tg, val_in, val_tg = split_files(input_files, target_files, VAL_SPLIT, SEED)
 
     # create data loader for training and validation dataset with a batch_size
-    train_loader = make_loader(train_in, train_tg, args.batch, shuffle=True, device=device)
+    train_loader = make_loader(train_in, train_tg, args.batch, shuffle=True, device=device, use_augmentation=use_augmentation)
+    # data augmentation is applied only to the training dataset, not to the validation dataset.
     val_loader = make_loader(val_in, val_tg, args.batch, shuffle=False, device=device)
 
     # Model, optimizer, scheduler
