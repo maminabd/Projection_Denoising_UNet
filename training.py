@@ -4,8 +4,8 @@ import numpy as np
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from libs.dataset import (check_files, find_paired_files, 
-                          split_files, collate_batch, load_as_tensor)
+from libs.dataset import (check_files, find_paired_files, split_files, 
+                          collate_batch, load_as_tensor, collate_augmented_batch)
 import torch.nn.functional as F
 from libs.unet import UNet
 from libs.utils import (save_checkpoint, get_device, plot_history, load_checkpoint)
@@ -27,7 +27,6 @@ MAE_WEIGHT, SSIM_WEIGHT, GRADIENT_WEIGHT = 0.5, 0.25, 0.25
 # Data Augmentation Configuration
 use_augmentation = True  # Enable/disable rotation augmentation
 rotation_probability = 0.5  # Probability of applying rotation to each training sample
-ROTATION_ANGLES = [1, 2, 3]  # degrees
 
 def parse_args():
     """Command-line arguments: the options that change from one run to the next."""
@@ -41,42 +40,6 @@ def parse_args():
                                                                                                     
     return parser.parse_args()
                
-
-
-def collate_augmented_batch(path_pairs):
-    """
-    Read a batch of projection pairs in tensor, then augment (rotate) based on 
-    the data augmentation configuration and its random behavior, and finally 
-    stack them together and returns the batch of augmented projections.
-
-    Args:
-        path_pairs: list of (input_path, target_path) tuples.
-
-    Returns:
-        inputs, targets: tensors of shape (B, C, H, W).
-    """
-    inputs = torch.stack([load_as_tensor(input_path) for input_path, _ in path_pairs])
-    targets = torch.stack([load_as_tensor(target_path) for _, target_path in path_pairs])
-
-    augmented_inputs = []
-    augmented_targets = []
-
-    angle = random.choice(ROTATION_ANGLES)
-
-    for input_tensor, target_tensor in zip(inputs, targets):
-
-        if use_augmentation and random.random() < rotation_probability:
-            input_tensor, target_tensor = rotation_augmentation(input_tensor, target_tensor, angle)
-
-        augmented_inputs.append(input_tensor)
-        augmented_targets.append(target_tensor)
-
-        inputs = torch.stack(augmented_inputs)
-        targets = torch.stack(augmented_targets)
-        
-    return inputs, targets
-
-
 def make_loader(input_files, target_files, batch_size, shuffle, device, use_augmentation=False):
     """
     Build a DataLoader over the (input, target) file pairs.
@@ -98,7 +61,7 @@ def make_loader(input_files, target_files, batch_size, shuffle, device, use_augm
     path_pairs = list(zip(input_files, target_files))
 
     dataloader = DataLoader(path_pairs, batch_size=batch_size, shuffle=shuffle,
-                      collate_fn=collate_augmented_batch if use_augmentation else collate_batch,
+                      collate_fn= lambda batch: collate_augmented_batch(path_pairs = batch, use_augmentation=use_augmentation, rotation_probability=rotation_probability) if use_augmentation else collate_batch(path_pairs = batch),
                       num_workers=NUM_WORKERS, pin_memory=device.type == 'cuda')
 
     return dataloader
@@ -208,6 +171,7 @@ def main():
     f"  Number of validation projections: {len(val_in)}\n"
     f"Batch size: {args.batch}, number of epochs: {args.epochs}\n"
     f"Save the model after each: {args.save_model_every} epochs\n"
+    f"Data augmentation: rotation {use_augmentation} (probability {rotation_probability}), "
     f"Scheduler: CosineAnnealingWarmRestarts. Parameters:\n"
     f"  initial lr: {LEARNING_RATE}, \n"
     f"  T_0: {T_0}, \n"
