@@ -177,9 +177,10 @@ def collate_augmented_batch(path_pairs, use_augmentation=False, rotation_probabi
     augmented_inputs = []
     augmented_targets = []
     ROTATION_KS = [1, 2, 3]
-    angle = random.choice(ROTATION_KS)
-
+    
     for input_tensor, target_tensor in zip(inputs, targets):
+
+        angle = random.choice(ROTATION_KS)
 
         if use_augmentation and random.random() < rotation_probability:
             
