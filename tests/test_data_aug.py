@@ -27,6 +27,11 @@ ALL_PATH_PAIRS = list(zip(input_files, target_files))
 # define the rotation angles parameter for the tests
 ROTATION_KS = [1, 2, 3] # Rotation angles: k=1: 90° , k=2: 180° , k=3: 270°
 
+
+# ----------------------------------------------------
+# tests for rotation_augmentation function
+# ----------------------------------------------------
+
 @pytest.mark.parametrize("k", ROTATION_KS)
 @pytest.mark.parametrize("inp, tgt", ALL_PROJECTION_PAIRS)
 def test_rotation_returns_tensor(inp, tgt, k):
@@ -151,6 +156,9 @@ def test_rotation_function_respects_the_channels_order(k):
         "tgt channel 1 changed value after rotation"
 
 
+# ----------------------------------------------------
+# tests for collate_augmented_batch function
+# ----------------------------------------------------
 
 @pytest.mark.parametrize("path_pairs", ALL_PATH_PAIRS)
 def test_collate_augmented_batch_is_unchanged_when_rotation_is_disabled(path_pairs):
@@ -198,3 +206,128 @@ def test_collate_augmented_batch_is_unchanged_with_zero_probabilities(path_pairs
 
     assert torch.equal(inputs, expected_inputs), "The inputs changed although the rotation probability is 0"
     assert torch.equal(targets, expected_targets), "The targets changed although the rotation probability is 0"
+
+@pytest.mark.parametrize("path_pair", ALL_PATH_PAIRS[:1]) 
+# only test on the first projection pair to avoid long test time
+def test_collate_augmented_batch_rotates_expected_numberof_projections(path_pair):
+    """
+    GIVEN: a batch of 100 copies of a mouse projection while rotation is enabled
+           with a probability of 0.25 for augmentation
+    WHEN: collate_augmented_batch is called with a seeded generator
+    THEN: about 25% of the projections are rotated
+    """
+
+    path_pairs = [path_pair]*100  # create a batch of 100 copies of the same projection
+    # does not matter which projection is used, we just want to check the share of rotated projections
+    original_inputs, _ = collate_batch(path_pairs)
+
+    # Seed the random generator to make the test reproducible
+    random.seed(0)
+
+    inputs, _ = collate_augmented_batch(
+        path_pairs,
+        use_augmentation=True,
+        rotation_probability=0.25,
+    )
+
+    n_rotated = 0
+    for projection in inputs:
+        if not torch.equal(projection, original_inputs[0]):
+            n_rotated += 1
+
+    assert abs(n_rotated / 100 - 0.25) < 0.1, f"Expected about 25% rotated projections, got {n_rotated}%"
+
+
+@pytest.mark.parametrize("path_pair", ALL_PATH_PAIRS[:1]) 
+# only test on the first pair to avoid long test time
+def test_collate_augmented_batch_uses_every_rotation_angle(path_pair):
+
+    """
+    GIVEN: a batch of many copies of the same mouse projection while
+           the rotation enabled with a probability of 1.
+    WHEN: collate_augmented_batch is called with a seeded generator.
+    THEN: every rotation (k=1, 2 and 3) occurs in the batch,
+    """
+
+    path_pair = [path_pair]
+    original_inputs, _ = collate_batch(path_pair)
+
+    # The 3 possible cases of rotating a (C, H, W) tensor, in the order of ANGLE_KS.
+    rotation_case1 = torch.rot90(original_inputs[0], 1, dims=[1, 2])
+    rotation_case2 = torch.rot90(original_inputs[0], 2, dims=[1, 2])
+    rotation_case3 = torch.rot90(original_inputs[0], 3, dims=[1, 2])
+    all_rotation_cases = [rotation_case1, rotation_case2, rotation_case3]
+    
+    random.seed(0)
+
+    inputs, _ = collate_augmented_batch(
+        path_pair*100,
+        use_augmentation=True,
+        rotation_probability=1.0,
+    )
+
+    rotations_found = []
+    for projection in inputs:
+        for k in ROTATION_KS:
+            if torch.equal(projection, all_rotation_cases[k-1]):
+                if k not in rotations_found:
+                    rotations_found.append(k)
+
+    assert 1 in rotations_found, "Rotation k=1 was never found in the batch"
+    assert 2 in rotations_found, "Rotation k=2 was never found in the batch"
+    assert 3 in rotations_found, "Rotation k=3 was never found in the batch"
+
+        
+@pytest.mark.parametrize("path_pair", ALL_PATH_PAIRS[:1]) 
+# only test on the first pair to avoid long test time
+def test_collate_augmented_batch_rotation_distribution_is_uniform(path_pair):
+    """
+    GIVEN: a batch of many copies of the same mouse projection while
+           the rotation enabled with a probability of 1.
+    WHEN: collate_augmented_batch is called with a seeded generator
+    THEN: each of the 3 possible rotations (k=1, 2, 3) occurs roughly 1/3 of the time,
+          confirming the angle is chosen uniformly at random for each projection
+    """
+
+    path_pair = [path_pair]
+    original_inputs, _ = collate_batch(path_pair)
+
+    # The 3 possible cases of rotating a (C, H, W) tensor, in the order of ANGLE_KS.
+    rotation_case1 = torch.rot90(original_inputs[0], 1, dims=[1, 2])
+    rotation_case2 = torch.rot90(original_inputs[0], 2, dims=[1, 2])
+    rotation_case3 = torch.rot90(original_inputs[0], 3, dims=[1, 2])
+    all_rotation_cases = [rotation_case1, rotation_case2, rotation_case3]
+
+    random.seed(0)
+
+    batch_size = 300  # large enough for the counts to settle near the true probability
+    inputs, _ = collate_augmented_batch(path_pair*batch_size,use_augmentation=True, rotation_probability=1.0)
+
+    # Count how many times each rotation k was found in the batch.
+    rotations_found = {1: 0, 2: 0, 3: 0}
+    for projection in inputs:
+        for k in ROTATION_KS:
+            if torch.equal(projection, all_rotation_cases[k-1]):
+                rotations_found[k] += 1
+
+    # Convert counts into proportions out of the whole batch.
+    proportion = {}
+    proportion[1] = rotations_found[1] / batch_size
+    proportion[2] = rotations_found[2] / batch_size
+    proportion[3] = rotations_found[3] / batch_size
+
+    expected_proportion = 1 / len(ROTATION_KS)  # should be 1/3 for all k values
+    tolerance = 0.03  # allow +/- 3 percentage points of random noise
+
+    assert abs(proportion[1] - expected_proportion) < tolerance, (
+                f"Rotation k=1 occurred {proportion[1]:.2%} of the time, "
+                f"expected close to {expected_proportion:.2%}")
+   
+    assert abs(proportion[2] - expected_proportion) < tolerance, (
+                f"Rotation k=2 occurred {proportion[2]:.2%} of the time, "
+                f"expected close to {expected_proportion:.2%}")
+    
+    assert abs(proportion[3] - expected_proportion) < tolerance, (
+                f"Rotation k=3 occurred {proportion[3]:.2%} of the time, "
+                f"expected close to {expected_proportion:.2%}")
+        
