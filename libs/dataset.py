@@ -4,6 +4,8 @@ import os
 import numpy as np
 from sklearn.model_selection import train_test_split
 import torch
+import random
+from libs.data_augmentation import rotation_augmentation
 
 IMAGE_SHAPE = (300, 300, 2)  # (H, W, C) for each single projection
 
@@ -153,3 +155,40 @@ def collate_batch(path_pairs):
     targets = torch.stack([load_as_tensor(target_path) for _, target_path in path_pairs])
     return inputs, targets
 
+def collate_augmented_batch(path_pairs, use_augmentation=False, rotation_probability=0.5):
+
+    """
+    Read a batch of projection pairs in tensor, then augment (rotate) based on
+    the data augmentation configuration and its random behavior, and finally
+    stack them together and returns the batch of augmented projections.
+
+    Args:
+        path_pairs: list of (input_path, target_path) tuples.
+        use_augmentation: boolean, whether to apply augmentation or not.
+        rotation_probability: float, probability of applying rotation augmentation to each projection pair.
+
+    Returns:
+        inputs, targets: tensors of shape (B, C, H, W).
+    """
+
+    inputs = torch.stack([load_as_tensor(input_path) for input_path, _ in path_pairs])
+    targets = torch.stack([load_as_tensor(target_path) for _, target_path in path_pairs])
+
+    augmented_inputs = []
+    augmented_targets = []
+    ROTATION_KS = [1, 2, 3]
+    angle = random.choice(ROTATION_KS)
+
+    for input_tensor, target_tensor in zip(inputs, targets):
+
+        if use_augmentation and random.random() < rotation_probability:
+            
+            input_tensor, target_tensor = rotation_augmentation(input_tensor, target_tensor, angle)
+
+        augmented_inputs.append(input_tensor)
+        augmented_targets.append(target_tensor)
+
+        inputs = torch.stack(augmented_inputs)
+        targets = torch.stack(augmented_targets)
+
+    return inputs, targets
