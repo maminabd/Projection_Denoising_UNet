@@ -127,7 +127,7 @@ def test_rotation_function_respects_the_channels_order(k):
     """
     GIVEN: an input and a target whose each channel is filled with a specific constant value
     WHEN: the rotation_augmentation is applied
-    THEN: every channel still holds its own constant value, so the channels (LE and HE) are not mixed
+    THEN: every channel still holds its own constant value, so the channels order is (LE and HE)
     """ 
 
     # Create input and target, each has shape (2, 300, 300)
@@ -176,7 +176,8 @@ def test_collate_augmented_batch_is_unchanged_when_rotation_is_disabled(path_pai
     inputs, targets = collate_augmented_batch(
         path_pairs,
         use_augmentation=False,
-        rotation_probability=1.0
+        rotation_probability=1.0,
+        flip_probability=0.0
     )
 
     assert torch.equal(inputs, expected_inputs), \
@@ -201,7 +202,8 @@ def test_collate_augmented_batch_is_unchanged_with_zero_probabilities(path_pairs
     inputs, targets = collate_augmented_batch(
         path_pair,
         use_augmentation=True,
-        rotation_probability=0.0
+        rotation_probability=0.0,
+        flip_probability=0.0
     )
 
     assert torch.equal(inputs, expected_inputs), "The inputs changed although the rotation probability is 0"
@@ -228,6 +230,7 @@ def test_collate_augmented_batch_rotates_expected_numberof_projections(path_pair
         path_pairs,
         use_augmentation=True,
         rotation_probability=0.25,
+        flip_probability=0.0
     )
 
     n_rotated = 0
@@ -264,6 +267,7 @@ def test_collate_augmented_batch_uses_every_rotation_angle(path_pair):
         path_pair*100,
         use_augmentation=True,
         rotation_probability=1.0,
+        flip_probability=0.0
     )
 
     rotations_found = []
@@ -301,8 +305,13 @@ def test_collate_augmented_batch_rotation_distribution_is_uniform(path_pair):
     random.seed(0)
 
     batch_size = 300  # large enough for the counts to settle near the true probability
-    inputs, _ = collate_augmented_batch(path_pair*batch_size,use_augmentation=True, rotation_probability=1.0)
-
+    inputs, _ = collate_augmented_batch(
+            path_pair*batch_size,
+            use_augmentation=True,
+            rotation_probability=1.0,
+            flip_probability=0.0
+        ) # flipping is disabled to avoid interference with rotation counts
+    
     # Count how many times each rotation k was found in the batch.
     rotations_found = {1: 0, 2: 0, 3: 0}
     for projection in inputs:
@@ -330,4 +339,3 @@ def test_collate_augmented_batch_rotation_distribution_is_uniform(path_pair):
     assert abs(proportion[3] - expected_proportion) < tolerance, (
                 f"Rotation k=3 occurred {proportion[3]:.2%} of the time, "
                 f"expected close to {expected_proportion:.2%}")
-        
