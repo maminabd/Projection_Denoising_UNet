@@ -5,7 +5,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 import torch
 import random
-from libs.data_augmentation import rotation_augmentation
+from libs.data_augmentation import rotation_augmentation, flipping_augmentation
 
 IMAGE_SHAPE = (300, 300, 2)  # (H, W, C) for each single projection
 
@@ -155,10 +155,10 @@ def collate_batch(path_pairs):
     targets = torch.stack([load_as_tensor(target_path) for _, target_path in path_pairs])
     return inputs, targets
 
-def collate_augmented_batch(path_pairs, use_augmentation=False, rotation_probability=0.5):
+def collate_augmented_batch(path_pairs, use_augmentation=False, rotation_probability=0.5, flip_probability=0.25):
 
     """
-    Read a batch of projection pairs in tensor, then augment (rotate) based on
+    Read a batch of projection pairs in tensor, then augment (rotate/flip) based on
     the data augmentation configuration and its random behavior, and finally
     stack them together and returns the batch of augmented projections.
 
@@ -166,9 +166,9 @@ def collate_augmented_batch(path_pairs, use_augmentation=False, rotation_probabi
         path_pairs: list of (input_path, target_path) tuples.
         use_augmentation: boolean, whether to apply augmentation or not.
         rotation_probability: float, probability of applying rotation augmentation to each projection pair.
-
+        flip_probability: float, probability of applying flipping augmentation to each projection pair.
     Returns:
-        inputs, targets: tensors of shape (B, C, H, W).
+        inputs, targets: tensors of shape (B, C, H, W), maybe rotated/flipped or not
     """
 
     inputs = torch.stack([load_as_tensor(input_path) for input_path, _ in path_pairs])
@@ -180,11 +180,17 @@ def collate_augmented_batch(path_pairs, use_augmentation=False, rotation_probabi
     
     for input_tensor, target_tensor in zip(inputs, targets):
 
+        flip_type = random.randint(0, 2)  # 0: horizontal, 1: vertical, 2: both
         angle = random.choice(ROTATION_KS)
 
         if use_augmentation and random.random() < rotation_probability:
-            
+
             input_tensor, target_tensor = rotation_augmentation(input_tensor, target_tensor, angle)
+
+        if use_augmentation and random.random() < flip_probability:
+            
+            input_tensor, target_tensor = flipping_augmentation(input_tensor, target_tensor, flip_type)
+        
 
         augmented_inputs.append(input_tensor)
         augmented_targets.append(target_tensor)
