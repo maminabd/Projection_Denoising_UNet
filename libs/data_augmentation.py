@@ -24,3 +24,28 @@ def rotation_augmentation(input, target, k):
         target = torch.rot90(target, k, dims=[1, 2])
 
         return input, target
+
+def flipping_augmentation(input_tensor, target_tensor, flip_type):
+    """
+    Flip the input and the target both in the same way and they are chosen at randomly.
+    flipping is horizontally, vertically, or both.
+
+    Args:
+        input_tensor: Input tensor (C, H, W).
+        target_tensor: Target tensor (C, H, W).
+        flip_type: Type of flip to apply. 0 for horizontal, 1 for vertical, 2 for both.
+
+    Returns:
+        Flipped (input, target) tensors, with the same shape as the inputs.
+    """
+
+    if flip_type == 0:
+        dims = [2]      # horizontal flip (left-right): along the width
+    elif flip_type == 1:
+        dims = [1]      # vertical flip (up-down): along the height
+    else:
+        dims = [1, 2]   # both flips
+
+    flipped_inp_tens, flipped_tg_tens = torch.flip(input_tensor, dims=dims), torch.flip(target_tensor, dims=dims)
+
+    return flipped_inp_tens, flipped_tg_tens
