@@ -26,12 +26,30 @@ def check_files(input_files, target_files, image_shape=IMAGE_SHAPE):
         image_shape: Expected shape (H, W, C) of every projection.
 
     Raises:
-        ValueError: if the two lists have different lengths, or if a file whether in
-            input or target does not have the expected shape i.e. (300, 300, 2)
+        ValueError: if the two lists have different lengths, 
+                    or if the intensity values are outside the range [0, 1], 
+                    or if a file whether in input or target does not have 
+                    the expected shape i.e. (300, 300, 2)
     """
 
     if len(input_files) != len(target_files):
         raise ValueError("Number of input and target files differ!")
+
+    for path in list(input_files):
+            inp = np.load(path)
+            if inp.min() < 0 or inp.max() > 1:
+                raise ValueError(
+                    f"{path}: intensity values of input files should be in [0, 1], "
+                    f"got range [{inp.min()}, {inp.max()}]"
+                )
+  
+    for path in list(target_files):
+                tgt = np.load(path)
+                if tgt.min() < 0 or tgt.max() > 1:
+                    raise ValueError(
+                        f"{path}: intensity values of target files should be in [0, 1], "
+                        f"got range [{tgt.min()}, {tgt.max()}]"
+                    )
 
     for path in list(input_files):
         loaded_array = np.load(path)
