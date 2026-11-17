@@ -33,6 +33,30 @@ def test_check_files_accepts_valid_files(tmp_path):
 
     check_files(input_list, target_list)
 
+def test_check_files_invalid_intensity_values_raises(tmp_path):
+
+    """
+    GIVEN: input and targets are .npy files with intensity values outside the range [0, 1]
+    WHEN: check_files is called
+    THEN: a ValueError is raised
+    """
+    torch.manual_seed(42)
+
+    # create directories and save the .npy files
+    input_dir = tmp_path / "input_data"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    input_path = input_dir / "mouse_1.npy"
+    input_path_str = str(input_path)
+    np.save(input_path, (np.random.randn(*IMAGE_SHAPE)).astype(np.float32)) # values outside range [0, 1]
+
+    target_dir = tmp_path / "target_data"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / "mouse_1.npy"
+    target_path_str = str(target_path)
+    np.save(target_path, (np.random.randn(*IMAGE_SHAPE)).astype(np.float32)) # values outside range [0, 1]
+        
+    with pytest.raises(ValueError, match="intensity"):
+        check_files([input_path_str], [target_path_str])
 
 def test_check_files_length_mismatch_raises(tmp_path):
 
