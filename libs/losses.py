@@ -29,12 +29,12 @@ def gradient_loss(pred, target):
     return gradient_loss_value
 
 
-def denoising_loss(outputs, targets, mae_weight=1, ssim_weight=1, gradient_weight=1):
+def denoising_loss(predictions, targets, mae_weight=1, ssim_weight=1, gradient_weight=1):
     """
     Combined denoising loss, computed on both channels (LE and HE).
 
     Args:
-        outputs: Predicted (denoised) projections, shape (B, C, H, W).
+        prediction: Predicted (denoised) projections, shape (B, C, H, W).
         targets: target (noiseless) projections, shape (B, C, H, W).
         mae_weight: Weight of the mean absolute error term.
         ssim_weight: Weight of the SSIM term with a 3x3 window.
@@ -44,7 +44,7 @@ def denoising_loss(outputs, targets, mae_weight=1, ssim_weight=1, gradient_weigh
         one scalar loss, which is the weighted sum of the three components.
     """
 
-    loss = (mae_weight*F.l1_loss(outputs, targets) + ssim_weight*ssim_loss(outputs, targets, window_size=3) + gradient_weight*gradient_loss(outputs, targets))
+    loss = (mae_weight*F.l1_loss(predictions, targets) + ssim_weight*ssim_loss(predictions, targets, window_size=3) + gradient_weight*gradient_loss(predictions, targets))
 
 
     return loss
