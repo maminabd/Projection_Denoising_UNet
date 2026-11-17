@@ -1,7 +1,24 @@
 import math
+import pytest
 import torch
+from libs.dataset import find_paired_files, load_as_tensor
 from libs.losses import denoising_loss, gradient_loss
 from libs.ssim import gaussian_window, ssim_loss
+import os
+
+# define the path to the projections_for_testing folder which contains 
+# input_testing and target_testing subfolders of mouse projections for testing purposes                                                                                                                                                                                                                                                                                                               
+PROJECTIONS_DIR = os.path.join(os.path.dirname(__file__), "projections_for_testing")
+
+# from the folders, find the paired input and target files for testing                                                                                                                                            
+input_files, target_files = find_paired_files(
+    os.path.join(PROJECTIONS_DIR, "input_testing"),
+    os.path.join(PROJECTIONS_DIR, "target_testing"),)
+
+# load the paired input and target files as torch tensors                                                                                                                  
+ALL_PROJECTION_PAIRS = [
+    (load_as_tensor(inp), load_as_tensor(tgt))
+    for inp, tgt in zip(input_files, target_files)]
 
 def test_gradient_loss_is_zero_for_identical_tensors():
     """
@@ -193,6 +210,28 @@ def test_gaussian_window_shape_and_normalization():
 
     assert torch.isclose(window.sum(), torch.tensor(1.0), atol=1e-6), \
         f"Expected the window to sum to 1, got {window.sum().item()}"
+
+def test_gaussian_window_peaks_at_the_centre():
+    """
+    GIVEN: a window_size and a sigma to create a Gaussian window
+    WHEN: gaussian_window is created
+    THEN: the centre of the window holds the largest weight (the window has Gaussian shape)
+    """
+    window = gaussian_window(window_size=5, sigma=1.5)[0, 0]
+
+    assert window[2, 2] == window.max(), "The centre of the window should hold the largest weight"
+
+
+def test_gaussian_window_is_symmetric():
+    """
+    GIVEN: a window_size and a sigma to create a Gaussian window
+    WHEN: gaussian_window is created
+    THEN: the window is symmetric
+    """
+    window = gaussian_window(window_size=5, sigma=1.5)[0, 0]
+
+    assert torch.allclose(window, window.flip(0)), "The window should be symmetric along the height"
+    assert torch.allclose(window, window.flip(1)), "The window should be symmetric along the width"
 
 def test_ssim_loss_gives_scalar_not_map():
     """
@@ -422,3 +461,144 @@ def test_ssim_loss_matches_handy_calculated_value():
     assert abs(loss.item() - expected_loss) < 1e-6, (
         f"ssim_loss should match the handy calculated value {expected_loss}, got {loss.item()}"
     )
+
+
+def test_ssim_loss_returns_values_in_valid_range():
+    """
+    GIVEN: a target in the range of [0, 1] and 
+           a prediction with values above 1 and below 0, as an untrained model
+           can produce in the first epochs of training.
+    WHEN: ssim_loss is computed
+    THEN: the result is in the range [0, 1]
+    """
+    torch.manual_seed(42)
+    pred = torch.randn(1, 2, 16, 16) * 2 # normal distribution with mean 0, std 2,
+                                         # so values outside range [-2,2] are likely
+
+    target = torch.rand(1, 2, 16, 16) # uniform distribution strictly in the range [0, 1]
+
+    ssim_loss_value = ssim_loss(pred, target)
+
+    assert 0 <= ssim_loss_value <= 1, \
+        "SSIM loss values must be in the range [0, 1]"
+
+
+def test_ssim_loss_gives_zero_for_perfect_prediction():
+    """
+    GIVEN: a prediction whose both channels are perfectly predicted
+    WHEN: ssim_loss is computed on both channels together and separately
+    THEN: the loss of each channel and the loss of both channels together are all ~0
+    """
+
+    # create a target with two channels, each filled with a constant value
+    target_ch0 = torch.full((4, 1, 300, 300), 0.5)
+    target_ch1 = torch.full((4, 1, 300, 300), 0.4)
+
+    # concatenate the two channels to form a target tensor of shape (4, 2, 300, 300)
+    target = torch.cat([target_ch0, target_ch1], dim=1)
+
+    # create a prediction with two channels, each filled with the same constant value as the target
+    pred_ch0 = torch.full((4, 1, 300, 300), 0.5)
+    pred_ch1 = torch.full((4, 1, 300, 300), 0.4)
+
+    # concatenate the two channels to form a prediction tensor of shape (4, 2, 300, 300)
+    pred = torch.cat([pred_ch0, pred_ch1], dim=1)
+
+    # calculate the ssim loss for both channels together and each channel separately
+    both = ssim_loss(pred, target)
+    first = ssim_loss(pred_ch0, target_ch0)
+    second = ssim_loss(pred_ch1, target_ch1)
+
+    assert abs(first.item()) < 1e-6, f"The first channel (perfectly predicted) should have ~0 loss, got {first.item()}"
+    assert abs(second.item()) < 1e-6, f"The second channel (perfectly predicted) should have ~0 loss, got {second.item()}"
+    assert abs(both.item()) < 1e-6, f"The both channels (perfectly predicted) should have ~0 loss, got {both.item()}"
+    
+@pytest.mark.parametrize("inp, tgt", ALL_PROJECTION_PAIRS)
+def test_ssim_loss_treats_channels_independently(inp, tgt):
+    """
+    GIVEN: mouse projection pair (pred, target) whose shape is (2, 300, 300)
+    WHEN: ssim_loss is computed on both channels together and each channel separately
+    THEN: the returned ssim loss equals the mean of the two single-channel ssim losses
+    """
+
+    # reshape the input and target tensors to have a batch dimension of 1
+    pred = inp.unsqueeze(0)     # change (2, 300, 300) to (1, 2, 300, 300)
+    target = tgt.unsqueeze(0)   # change (2, 300, 300) to (1, 2, 300, 300)
+
+    # separate the channels of the prediction and target tensors
+    pred_ch0 =pred[:, 0:1]
+    pred_ch1 = pred[:, 1:2]
+    target_ch0 = target[:, 0:1]
+    target_ch1 = target[:, 1:2]
+
+    # calculate the ssim loss for both channels together and each channel separately
+    both = ssim_loss(pred, target)
+    first = ssim_loss(pred_ch0, target_ch0)
+    second = ssim_loss(pred_ch1, target_ch1)
+
+    assert torch.isclose(both, (first + second) / 2, atol=1e-6), (
+        f"Expected mean of channel losses {((first + second) / 2).item():.6f}, "
+        f"got {both.item():.6f}"
+    )
+
+def test_ssim_loss_handles_small_differences():
+    """
+    GIVEN: a prediction whose channels have small differences from the target channels
+    WHEN: ssim_loss is computed on both channels together and separately
+    THEN: the loss of each channel and the loss of both channels are computed correctly, 
+          so, stability constants are working correctly.
+    """
+
+    # create a target with two channels, each filled with a constant value
+    target_ch0 = torch.full((4, 1, 300, 300), 0.5)
+    target_ch1 = torch.full((4, 1, 300, 300), 0.4)
+    
+    # concatenate the two channels to form a target tensor of shape (4, 2, 300, 300)
+    target = torch.cat([target_ch0, target_ch1], dim=1)
+
+    # create a prediction with two channels, each filled with ...
+    # constant values slightly different than target.
+    pred_ch0 = torch.full((4, 1, 300, 300), 0.5*1e-6)  # almost perfect prediction for channel 0
+    pred_ch1 = torch.full((4, 1, 300, 300), 0.4*1e-6)  # almost perfect prediction for channel 1
+    
+    # concatenate the two channels to form a prediction tensor of shape (4, 2, 300, 300)
+    pred = torch.cat([pred_ch0, pred_ch1], dim=1) 
+
+    # calculate the ssim loss for both channels together and each channel separately
+    both = ssim_loss(pred, target)
+    first = ssim_loss(pred_ch0, target_ch0)
+    second = ssim_loss(pred_ch1, target_ch1)
+
+    assert torch.isclose(both, (first + second) / 2, atol=1e-8), \
+        f"Expected the mean of the channel losses {((first + second) / 2).item()}, got {both.item()}"
+
+def test_ssim_loss_handles_large_differences():
+    """
+    GIVEN: a prediction whose channels have large differences from the target channels
+    WHEN: ssim_loss is computed on both channels together and separately
+    THEN: the loss of each channel and the loss of both channels are computed correctly, 
+          so, stability constants are working correctly.
+    """
+
+    # create a target with two channels, each filled with a constant value
+    target_ch0 = torch.full((4, 1, 300, 300), 0.0)
+    target_ch1 = torch.full((4, 1, 300, 300), 0.0)
+    
+    # concatenate the two channels to form a target tensor of shape (4, 2, 300, 300)
+    target = torch.cat([target_ch0, target_ch1], dim=1)
+
+    # create a prediction with two channels, each filled with ...
+    # constant values slightly different than target.
+    pred_ch0 = torch.full((4, 1, 300, 300), 1.0)  # almost perfect prediction for channel 0
+    pred_ch1 = torch.full((4, 1, 300, 300), 1.0)  # almost perfect prediction for channel 1
+    
+    # concatenate the two channels to form a prediction tensor of shape (4, 2, 300, 300)
+    pred = torch.cat([pred_ch0, pred_ch1], dim=1) 
+
+    # calculate the ssim loss for both channels together and each channel separately
+    both = ssim_loss(pred, target)
+    first = ssim_loss(pred_ch0, target_ch0)
+    second = ssim_loss(pred_ch1, target_ch1)
+
+    assert torch.isclose(both, (first + second) / 2, atol=1e-8), \
+        f"Expected the mean of the channel losses {((first + second) / 2).item()}, got {both.item()}"
