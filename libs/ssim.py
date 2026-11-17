@@ -59,34 +59,36 @@ def ssim_loss(pred, target, window_size=5, sigma=1.5):
     K1=0.01
     K2=0.03
 
-    # Compute data range from min/max of both pred and target.
-    data_max = torch.max(pred.max(), target.max())
-    data_min = torch.min(pred.min(), target.min())
-    data_range = (data_max - data_min).clamp(min=1e-8)  # to avoid division by zero
-        															  
+    data_range = 1
     C1 = (K1 * data_range) ** 2
     C2 = (K2 * data_range) ** 2
 
-    height, width = pred.shape[2:]
+    B, C, height, width = pred.shape
 
-    # Compare one channel at a time
-    pred = pred.reshape(-1, 1, height, width)
-    target = target.reshape(-1, 1, height, width)
+    # The model output is not bounded above, so bring both into [0, 1]
+    # pred = pred.clamp(0, 1)
+    # target = target.clamp(0, 1)
+
+    # Fold channels into the batch dim so each channel is convolved independently.
+    # which matchs the window shape (1, 1, window_size, window_size)
+    pred_flat = pred.reshape(B * C, 1, height, width)
+    target_flat = target.reshape(B * C, 1, height, width)
     
     window = gaussian_window(window_size, sigma)
-    padding = window_size // 2
 
     # match the dtype and device of the window to the predicted tensor
-    window = gaussian_window(window_size, sigma).to(pred)
+    window = window.to(pred_flat)
 
+    padding = window_size // 2
+    
     # Local means
-    mu_pred = F.conv2d(pred, window, padding=padding)
-    mu_target = F.conv2d(target, window, padding=padding)
+    mu_pred = F.conv2d(pred_flat, window, padding=padding)
+    mu_target = F.conv2d(target_flat, window, padding=padding)
 
     # Local variances and covariance
-    var_pred = F.conv2d(pred * pred, window, padding=padding) - mu_pred ** 2
-    var_target = F.conv2d(target * target, window, padding=padding) - mu_target ** 2
-    covariance = F.conv2d(pred * target, window, padding=padding) - mu_pred * mu_target
+    var_pred = F.conv2d(pred_flat * pred_flat, window, padding=padding) - mu_pred ** 2
+    var_target = F.conv2d(target_flat * target_flat, window, padding=padding) - mu_target ** 2
+    covariance = F.conv2d(pred_flat * target_flat, window, padding=padding) - mu_pred * mu_target
 
     ssim_map = ((2 * mu_pred * mu_target + C1) * (2 * covariance + C2) /
                 ((mu_pred ** 2 + mu_target ** 2 + C1) * (var_pred + var_target + C2)))
