@@ -3,12 +3,12 @@ import glob
 import os
 import random
 import torch
-from libs.data_augmentation import rotation_augmentation
+from libs.data_augmentation import rotation_augmentation, flipping_augmentation
 from libs.dataset import load_as_tensor, find_paired_files, collate_augmented_batch, collate_batch
 import pytest
 import numpy as np
 
- # define the path to the projections_for_testing folder which contains 
+# define the path to the projections_for_testing folder which contains 
 # input_testing and target_testing subfolders of mouse projections for testing purposes                                                                                                                                                                                                                                                                                                               
 PROJECTIONS_DIR = os.path.join(os.path.dirname(__file__), "projections_for_testing")
 
@@ -26,6 +26,9 @@ ALL_PATH_PAIRS = list(zip(input_files, target_files))
 
 # define the rotation angles parameter for the tests
 ROTATION_KS = [1, 2, 3] # Rotation angles: k=1: 90° , k=2: 180° , k=3: 270°
+
+# define the flip types parameter for the tests
+FLIP_TYPES = [0, 1, 2] # Flip types: 0: horizontal , 1: vertical , 2: both
 
 
 # ----------------------------------------------------
@@ -155,6 +158,125 @@ def test_rotation_function_respects_the_channels_order(k):
     assert torch.allclose(tgt_aug[1], torch.full((300, 300), 4.0)), \
         "tgt channel 1 changed value after rotation"
 
+# ----------------------------------------------------
+# tests for flipping_augmentation function
+# ----------------------------------------------------
+
+@pytest.mark.parametrize("flip_type", FLIP_TYPES)
+@pytest.mark.parametrize("inp, tgt", ALL_PROJECTION_PAIRS)
+def test_flipping_returns_tensor(inp, tgt, flip_type):
+    """
+    GIVEN: mouse input and target projection
+    WHEN: the flipping_augmentation is applied
+    THEN: it returns two torch tensors
+    """
+
+    inp_aug, tgt_aug = flipping_augmentation(inp, tgt, flip_type)
+
+    assert isinstance(inp_aug, torch.Tensor), f"Expected flipping_augmentation returns a tensor, got {type(inp_aug)}"
+    assert isinstance(tgt_aug, torch.Tensor), f"Expected flipping_augmentation returns a tensor, got {type(tgt_aug)}"
+
+@pytest.mark.parametrize("flip_type", FLIP_TYPES)
+@pytest.mark.parametrize("inp, tgt", ALL_PROJECTION_PAIRS)
+def test_flipping_output_is_float32(inp, tgt, flip_type):
+    """
+    GIVEN: mouse input and target projection, both float32
+    WHEN: the flipping_augmentation is applied
+    THEN: both outputs are float32 as well
+    """
+
+    inp_aug, tgt_aug = flipping_augmentation(inp, tgt, flip_type)
+    assert inp_aug.dtype == torch.float32, f"Expected flipping_augmentation returns a float32, got {inp_aug.dtype}"
+    assert tgt_aug.dtype == torch.float32, f"Expected flipping_augmentation returns a float32, got {tgt_aug.dtype}"
+
+@pytest.mark.parametrize("flip_type", FLIP_TYPES)
+@pytest.mark.parametrize("inp, tgt", ALL_PROJECTION_PAIRS)
+def test_flipping_output_has_the_shape_of_the_input(inp, tgt, flip_type):
+    """
+    GIVEN: mouse input and target projection of shape (2, 300, 300)
+    WHEN: the flipping_augmentation is applied
+    THEN: both outputs keep the shape (2, 300, 300)
+    """
+
+    inp_aug, tgt_aug = flipping_augmentation(inp, tgt, flip_type)
+    assert inp_aug.shape == inp.shape, \
+        f"Expected flipping_augmentation returns a shape {tuple(inp.shape)}, got {tuple(inp_aug.shape)}"
+    assert tgt_aug.shape == tgt.shape, \
+        f"Expected flipping_augmentation returns a shape {tuple(tgt.shape)}, got {tuple(tgt_aug.shape)}"
+
+@pytest.mark.parametrize("flip_type", FLIP_TYPES)
+@pytest.mark.parametrize("inp, tgt", ALL_PROJECTION_PAIRS)
+def test_flipping_output_stays_in_the_intensity_range_of_the_input(inp, tgt, flip_type):
+    """
+    GIVEN: mouse input and target projection
+    WHEN: the flipping_augmentation is applied
+    THEN: After flipping output values lies in the data range of the original projections,
+          and the minimum, maximum and mean intensity are the same as the original ones
+          (flipping only moves the pixels)
+    """
+
+    inp_aug, tgt_aug = flipping_augmentation(inp, tgt, flip_type)
+
+    assert inp_aug.min() == inp.min(), \
+        f"After flipping the minimum changed from {inp.min().item()} to {inp_aug.min().item()}"
+
+    assert inp_aug.max() == inp.max(), \
+        f"After flipping the maximum changed from {inp.max().item()} to {inp_aug.max().item()}"
+
+    assert tgt_aug.min() == tgt.min(), \
+        f"After flipping the minimum changed from {tgt.min().item()} to {tgt_aug.min().item()}"
+
+    assert tgt_aug.max() == tgt.max(), \
+        f"After flipping the maximum changed from {tgt.max().item()} to {tgt_aug.max().item()}"
+
+    assert torch.isclose(inp_aug.mean(), inp.mean(), atol=1e-6), \
+        f"After flipping the mean changed from {inp.mean().item()} to {inp_aug.mean().item()}"
+
+    assert torch.isclose(tgt_aug.mean(), tgt.mean(), atol=1e-6), \
+        f"After flipping the mean changed from {tgt.mean().item()} to {tgt_aug.mean().item()}"
+
+@pytest.mark.parametrize("flip_type", FLIP_TYPES)
+@pytest.mark.parametrize("inp, tgt", ALL_PROJECTION_PAIRS)
+def test_flipping_input_and_target_get_the_same_transformation(inp, tgt, flip_type):
+    """
+    GIVEN: the same projections are used as input and as target
+    WHEN: the flipping_augmentation is applied
+    THEN: both outputs (input and target) are identical, so a pair are flipped in the same way
+    """
+
+    # the intesity values of inp and tgt are different (test would fail)
+    # so we use inp as tgt as well to just check if the same flip is applied to both
+    inp_aug, tgt_aug = flipping_augmentation(inp, inp, flip_type)
+
+    assert torch.equal(inp_aug, tgt_aug), "Input and target were flipped differently"
+
+@pytest.mark.parametrize("flip_type", FLIP_TYPES)
+def test_flipping_respects_the_channels_order(flip_type):
+    """
+    GIVEN: an input and a target whose channels are each filled with a distinct constant value
+    WHEN: the flipping_augmentation is applied
+    THEN: every channel still holds its own constant value, so the channels order is (LE and HE)
+    """
+
+    inp = torch.stack([
+        torch.full((300, 300), 1.0),
+        torch.full((300, 300), 2.0),
+    ])
+    tgt = torch.stack([
+        torch.full((300, 300), 3.0),
+        torch.full((300, 300), 4.0),
+    ])
+
+    inp_aug, tgt_aug = flipping_augmentation(inp, tgt, flip_type)
+
+    assert torch.allclose(inp_aug[0], torch.full((300, 300), 1.0)), \
+        "inp channel 0 changed value after flipping"
+    assert torch.allclose(inp_aug[1], torch.full((300, 300), 2.0)), \
+        "inp channel 1 changed value after flipping"
+    assert torch.allclose(tgt_aug[0], torch.full((300, 300), 3.0)), \
+        "tgt channel 0 changed value after flipping"
+    assert torch.allclose(tgt_aug[1], torch.full((300, 300), 4.0)), \
+        "tgt channel 1 changed value after flipping"
 
 # ----------------------------------------------------
 # tests for collate_augmented_batch function
@@ -241,6 +363,37 @@ def test_collate_augmented_batch_rotates_expected_numberof_projections(path_pair
     assert abs(n_rotated / 100 - 0.25) < 0.1, f"Expected about 25% rotated projections, got {n_rotated}%"
 
 
+
+@pytest.mark.parametrize("path_pair", ALL_PATH_PAIRS[:1]) # only test on the first pair to avoid long test time
+def test_collate_augmented_batch_flips_about_the_expected_share_of_projections(path_pair):
+    """
+    GIVEN: only the flipping enabled with a probability of 0.25, and a batch of 100 copies
+           of the same real projection
+    WHEN: collate_augmented_batch is called with a seeded generator
+    THEN: about 25% of the projections are flipped (the decision is taken for each projection,
+          not once for the whole batch)
+    """
+
+    path_pair = [path_pair]
+    original_inputs, _ = collate_batch(path_pair)
+
+    random.seed(0)
+
+    inputs, _ = collate_augmented_batch(
+        path_pair*100,
+        use_augmentation=True,
+        rotation_probability=0.0,
+        flip_probability=0.25
+    )
+
+    n_flipped = 0
+    for projection in inputs:
+                if not torch.equal(projection, original_inputs[0]):
+                    n_flipped += 1
+
+    assert abs(n_flipped / 100 - 0.25) < 0.15, f"Expected about 25% flipped projections, got {n_flipped}%"
+
+
 @pytest.mark.parametrize("path_pair", ALL_PATH_PAIRS[:1]) 
 # only test on the first pair to avoid long test time
 def test_collate_augmented_batch_uses_every_rotation_angle(path_pair):
@@ -281,7 +434,45 @@ def test_collate_augmented_batch_uses_every_rotation_angle(path_pair):
     assert 2 in rotations_found, "Rotation k=2 was never found in the batch"
     assert 3 in rotations_found, "Rotation k=3 was never found in the batch"
 
-        
+@pytest.mark.parametrize("path_pair", ALL_PATH_PAIRS[:1]) # only test on the first pair to avoid long test time
+def test_collate_augmented_batch_uses_every_flip_type(path_pair):
+    """
+    GIVEN: only the flipping enabled with a probability of 1, and a batch of 100 copies of the
+           same real projection
+    WHEN: collate_augmented_batch is called with a seeded generator
+    THEN: the horizontal, the vertical and the double flip all occur in the batch
+    """
+
+    path_pairs = [path_pair]
+    original_inputs, _ = collate_batch(path_pairs)
+
+    # The 3 possible cases of flipping a (C, H, W) tensor, in the order of FLIP_TYPES.
+    flip_case1 = torch.flip(original_inputs[0], dims=[1])
+    flip_case2 = torch.flip(original_inputs[0], dims=[2])
+    flip_case3 = torch.flip(original_inputs[0], dims=[1, 2])
+    all_flip_cases = [flip_case1, flip_case2, flip_case3]
+
+    random.seed(0)
+
+    inputs, _ = collate_augmented_batch(
+        path_pairs*100,
+        use_augmentation=True,
+        rotation_probability=0.0,
+        flip_probability=1.0
+    )
+
+    flips_found = []
+    for projection in inputs:
+        for flip_type in FLIP_TYPES:
+            if torch.equal(projection, all_flip_cases[flip_type]):
+                if flip_type not in flips_found:
+                    flips_found.append(flip_type)
+
+    assert 0 in flips_found, "Flip type 0 (horizontal flip) was never found in the batch"
+    assert 1 in flips_found, "Flip type 1 (vertical flip) was never found in the batch"
+    assert 2 in flips_found, "Flip type 2 (double flip) was never found in the batch"
+
+
 @pytest.mark.parametrize("path_pair", ALL_PATH_PAIRS[:1]) 
 # only test on the first pair to avoid long test time
 def test_collate_augmented_batch_rotation_distribution_is_uniform(path_pair):
@@ -311,7 +502,8 @@ def test_collate_augmented_batch_rotation_distribution_is_uniform(path_pair):
             rotation_probability=1.0,
             flip_probability=0.0
         ) # flipping is disabled to avoid interference with rotation counts
-    
+
+
     # Count how many times each rotation k was found in the batch.
     rotations_found = {1: 0, 2: 0, 3: 0}
     for projection in inputs:
@@ -339,3 +531,5 @@ def test_collate_augmented_batch_rotation_distribution_is_uniform(path_pair):
     assert abs(proportion[3] - expected_proportion) < tolerance, (
                 f"Rotation k=3 occurred {proportion[3]:.2%} of the time, "
                 f"expected close to {expected_proportion:.2%}")
+
+        
