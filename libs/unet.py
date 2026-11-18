@@ -73,19 +73,24 @@ class UNet(nn.Module):
 
         self.enc3 = ResBlock(64, 128) # 64 --to--> 128
         self.pool3 = nn.MaxPool2d(2)
+        self.enc3_dropout = nn.Dropout2d(0.2)
 
         self.enc4 = ResBlock(128, 256) # 128 --to--> 256
         self.pool4 = nn.MaxPool2d(2)
+        self.enc4_dropout = nn.Dropout2d(0.3)
 
         # Bottleneck
         self.bridge = ResBlock(256, 512) # 256 --to--> 512
+        self.bridge_dropout = nn.Dropout2d(0.5)
 
         # Decoder: 512 --> 256 --> 128 --> 64 --> 32
         self.up4 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2) # upsampling (x2 dimension) and halving channels depth
         self.dec4 = ResBlock(512, 256)  # input: concatenates(enc4, up4) = 512
+        self.dec4_dropout = nn.Dropout2d(0.3)
 
         self.up3 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
         self.dec3 = ResBlock(256, 128)  # input: concatenates(enc3, up3) = 256
+        self.dec3_dropout = nn.Dropout2d(0.2)
 
         self.up2 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
         self.dec2 = ResBlock(128, 64)  # input: concatenates(enc2, up2) = 128
@@ -133,19 +138,22 @@ class UNet(nn.Module):
         enc1 = self.enc1(x)                       # (channels = 32,  H,    W)
         enc2 = self.enc2(self.pool1(enc1))         # (channels = 64,  H/2,  W/2)
         enc3 = self.enc3(self.pool2(enc2))         # (channels = 128, H/4,  W/4)
-        enc4 = self.enc4(self.pool3(enc3))         # (channels = 256, H/8,  W/8)
+        enc4 = self.enc4(self.enc3_dropout(self.pool3(enc3)))         # (channels = 256, H/8,  W/8)
 
         # Bottleneck
-        bridge = self.bridge(self.pool4(enc4))     # (512, H/16, W/16)
+        bridge = self.bridge(self.enc4_dropout(self.pool4(enc4)))     # (512, H/16, W/16)
+        bridge = self.bridge_dropout(bridge)
 
         # Decoder: upsample, resize, concatenate the skip connection, convolve
         dec4 = self._match_size(self.up4(bridge), enc4)
         cat4 = torch.cat([enc4, dec4], dim=1)
         dec4 = self.dec4(cat4)
+        dec4 = self.dec4_dropout(dec4)
 
         dec3 = self._match_size(self.up3(dec4), enc3)
         cat3 = torch.cat([enc3, dec3], dim=1)
         dec3 = self.dec3(cat3)
+        dec3 = self.dec3_dropout(dec3)
 
         dec2 = self._match_size(self.up2(dec3), enc2)
         cat2 = torch.cat([enc2, dec2], dim=1)
