@@ -602,3 +602,89 @@ def test_ssim_loss_handles_large_differences():
 
     assert torch.isclose(both, (first + second) / 2, atol=1e-8), \
         f"Expected the mean of the channel losses {((first + second) / 2).item()}, got {both.item()}"
+
+@pytest.mark.parametrize("inp, tgt", ALL_PROJECTION_PAIRS)
+def test_ssim_loss_backpropagates_gradient(inp, tgt):
+    """
+    GIVEN: a prediction that requires a gradient
+    WHEN: ssim_loss is back-propagated
+    THEN: a gradient reaches the prediction, so the term can
+          actually train the model
+    """
+
+    # reshape the input and target tensors to have a batch dimension of 1
+    pred = inp.unsqueeze(0)     # change (2, 300, 300) to (1, 2, 300, 300)
+    target = tgt.unsqueeze(0)   # change (2, 300, 300) to (1, 2, 300, 300)
+
+    # ensure the prediction requires a gradient
+    pred.requires_grad_(True)
+    
+    # compute the ssim loss and backpropagate to get the gradient
+    ssim_loss(pred, target).backward()
+
+    assert pred.grad is not None, "No gradient reached the prediction, " \
+        "which means gradients cannot flow back to the model and training fails"
+
+@pytest.mark.parametrize("inp, tgt", ALL_PROJECTION_PAIRS)
+def test_ssim_loss_gradient_is_finite(inp, tgt):
+    """
+    GIVEN: a prediction that requires a gradient
+    WHEN: ssim_loss is back-propagated
+    THEN: a finite gradient reaches the prediction
+    """
+
+    # reshape the input and target tensors to have a batch dimension of 1
+    pred = inp.unsqueeze(0)     # change (2, 300, 300) to (1, 2, 300, 300)
+    target = tgt.unsqueeze(0)   # change (2, 300, 300) to (1, 2, 300, 300)
+
+    # ensure the prediction requires a gradient
+    pred.requires_grad_(True)
+
+    # compute the ssim loss and backpropagate to get the gradient
+    ssim_loss(pred, target).backward()
+
+    assert torch.isfinite(pred.grad).all(), "The gradient contains NaN or infinite values"
+
+
+@pytest.mark.parametrize("inp, tgt", ALL_PROJECTION_PAIRS)
+def test_ssim_loss_gradient_is_nonzero(inp, tgt):
+    """
+    GIVEN: a prediction that requires a gradient
+    WHEN: ssim_loss is back-propagated
+    THEN: a non-zero gradient reaches the prediction
+    """
+
+    # reshape the input and target tensors to have a batch dimension of 1
+    pred = inp.unsqueeze(0)     # change (2, 300, 300) to (1, 2, 300, 300)
+    target = tgt.unsqueeze(0)   # change (2, 300, 300) to (1, 2, 300, 300)
+
+    # ensure the prediction requires a gradient
+    pred.requires_grad_(True)
+
+    # compute the ssim loss and backpropagate to get the gradient
+    ssim_loss(pred, target).backward()
+
+    assert pred.grad.abs().sum() > 0, "The gradient is zero everywhere"
+
+@pytest.mark.parametrize("inp, tgt", ALL_PROJECTION_PAIRS)
+def test_ssim_loss_decreases_with_gradient_step(inp, tgt):
+    torch.manual_seed(0)
+
+    # reshape the input and target tensors to have a batch dimension of 1
+    pred = inp.unsqueeze(0)     # change (2, 300, 300) to (1, 2, 300, 300)
+    target = tgt.unsqueeze(0)   # change (2, 300, 300) to (1, 2, 300, 300)
+
+    # ensure the prediction requires a gradient
+    pred.requires_grad_(True)
+
+    loss1 = ssim_loss(pred, target) # compute the initial loss
+    loss1.backward() # compute the gradient of the loss with respect to the prediction
+
+    # a simulation of a gradient descent step, which should reduce the loss
+    with torch.no_grad(): 
+        pred -= 0.1 * pred.grad # take a small gradient step to reduce the loss
+    pred.grad = None # reset the gradient for the next backward pass
+    loss2 = ssim_loss(pred, target) # compute the loss after the gradient step
+
+    assert loss2 < loss1, f"Expected loss to decrease after gradient step, \
+                but got loss2={loss2.item()} which is larger than loss1={loss1.item()}"
