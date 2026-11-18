@@ -99,21 +99,70 @@ def test_unet_keeps_output_shape_nondivisible_hw():
 
     assert output.shape == (8, 2, 301, 301), f"Expected shape (8, 2, 301, 301) in output of UNet, got {tuple(output.shape)}"
   
-def test_unet_respects_out_channels():
+def test_unet_supports_smaller_out_channels():
     """
-    GIVEN: a UNet built with an out_channels value different from in_channels
+    GIVEN: a UNet built with an out_channels value smaller than in_channels
     WHEN: forward is called
     THEN: the output has exactly out_channels channels
     """
     torch.manual_seed(42) # for reproducible across runs
-    model = UNet(in_channels=2, out_channels=1) # instantiate the UNet with 2 channels input and 1 channel output
+    model = UNet(in_channels=3, out_channels=1) # instantiate the UNet with 2 channels input and 1 channel output
     model.eval() # switch to evaluation mode (do inference) and no training mode
 
     # do inference, no gradients needed
     with torch.no_grad():
-        output = model(torch.randn(4, 2, 300, 300)) # forward a random 2 channels input through the model
+        output = model(torch.randn(4, 3, 300, 300)) # forward a random 4 channels input through the model
 
     assert output.shape == (4, 1, 300, 300), f"Expected shape (4, 1, 300, 300) in output of UNet, got {tuple(output.shape)}"
+
+
+def test_unet_supports_larger_out_channels():
+    """
+    GIVEN: a UNet built with an out_channels value is larger than in_channels
+    WHEN: forward is called
+    THEN: the output has exactly out_channels channels
+    """
+    torch.manual_seed(42) # for reproducible across runs
+    model = UNet(in_channels=1, out_channels=3) # instantiate the UNet with 1 channel input and 3 channel output
+    model.eval() # switch to evaluation mode (do inference) and no training mode
+
+    # do inference, no gradients needed
+    with torch.no_grad():
+        output = model(torch.randn(4, 1, 300, 300)) # forward a random 1 channel input through the model
+
+    assert output.shape == (4, 3, 300, 300), f"Expected shape (4, 3, 300, 300) in output of UNet, got {tuple(output.shape)}"
+
+
+def test_unet_supports_non_square_inputs_w_larger():
+    """
+    GIVEN: a UNet with 1 input and 3 output channels, and inputs of odd and non-square sizes
+    WHEN: UNet forward is called
+    THEN: the output keeps the height and width and has 3 channels
+    """
+    torch.manual_seed(42)
+    model = UNet(in_channels=2, out_channels=2).eval()
+
+    with torch.no_grad():
+            output = model(torch.randn(4, 2, 40, 56))
+
+    assert output.shape == (4, 2, 40, 56), \
+        f"Input 40x56: expected shape (4, 2, 40, 56) for output, got {tuple(output.shape)}"
+                
+
+def test_unet_supports_non_square_inputs_h_larger():
+    """
+    GIVEN: a UNet with 1 input and 3 output channels, and inputs of odd and non-square sizes
+    WHEN: UNet forward is called
+    THEN: the output keeps the height and width and has 3 channels
+    """
+    torch.manual_seed(42)
+    model = UNet(in_channels=2, out_channels=2).eval()
+
+    with torch.no_grad():
+            output = model(torch.randn(4, 2, 47, 33))
+    
+    assert output.shape == (4, 2, 47, 33), \
+        f"Input 47x33: expected shape (4, 2, 47, 33) for output, got {tuple(output.shape)}"
 
 
 def test_unet_supports_batch_size_one():
@@ -152,7 +201,102 @@ def test_unet_trains_every_parameter():
     # "unused" is the name, parameter of those don't see any gradient in backward().
     assert not unused, f"These parameters never received a gradient: {unused}"
 
-  
+
+def test_unet_feature_map_shapes_at_every_level():
+    """
+    GIVEN: an input whose shape (4, 2, 300, 300) B:atch size, C: Channels, H: Height, W: Width
+            which is non-divisible by 16,  
+    WHEN: UNet forward is called
+    THEN: the encoder levels have 32, 64, 128, 256 channels at 300, 150, 75, 37 pixels, 
+          the bottleneck has 512 channels at 18 pixels, 
+          and the decoder levels reverse to the 32 channels at 300 pixels
+    """
+    torch.manual_seed(42) # for reproducibility across runs
+    model = UNet(in_channels=2, out_channels=2).eval() # switch to evaluation mode (do inference) and no training mode
+
+    shapes = {}
+
+    # recover the encoder and decoder layers of the UNet model by their names
+    # and register a hook to capture the spatial size of the output tensor during the forward pass.
+    for name in ('enc1', 'enc2', 'enc3', 'enc4', 'bridge', 'dec4', 'dec3', 'dec2', 'dec1'):
+        getattr(model, name).register_forward_hook(
+            lambda module, inputs, output, name=name: shapes.update({name: tuple(output.shape)}))
+
+    with torch.no_grad(): # disable gradient calculation for inference
+        model(torch.randn(4, 2, 300, 300)) # forward a random input through the model
+
+    # Compare the captured shapes with the expected shapes at each level of the UNet architecture.
+    expected = {'enc1': (4, 32, 300, 300), 'enc2': (4, 64, 150, 150), 'enc3': (4, 128, 75, 75),
+                'enc4': (4, 256, 37, 37), 'bridge': (4, 512, 18, 18),
+                'dec4': (4, 256, 37, 37), 'dec3': (4, 128, 75, 75), 'dec2': (4, 64, 150, 150),
+                'dec1': (4, 32, 300, 300)}
+    
+    assert shapes == expected, f"Unexpected feature map shapes: {shapes}"
+
+
+def test_unet_decoder_realigns_with_the_skip_connections():
+    """
+    GIVEN: a 300x300 input, whose some of the encoder sizes (300, 150, 75, 37) are not all halvable
+    WHEN: UNet forward is called
+    THEN: every decoder level ends up with the spatial size of the encoder level it is paired with
+    """
+    torch.manual_seed(42) # for reproducibility across runs
+
+    # instantiate the UNet and switch to evaluation mode (do inference) and no training mode
+    model = UNet(in_channels=2, out_channels=2).eval()
+
+    sizes = {}
+
+    # recover the encoder and decoder layers of the UNet model by their names
+    # and register a hook to capture the spatial size of the output tensor during the forward pass.
+    for name in ('enc1', 'enc2', 'enc3', 'enc4', 'dec1', 'dec2', 'dec3', 'dec4'):
+        getattr(model, name).register_forward_hook(
+            lambda module, inputs, output, name=name: sizes.update({name: tuple(output.shape[2:])}))
+
+    # forward pass without computing gradients
+    with torch.no_grad(): # disable gradient calculation for inference
+        model(torch.randn(4, 2, 300, 300)) # forward a random input through the model
+
+    # Compare the captured sizes of the decoder levels with the corresponding encoder levels to ensure they match.
+    for level in (1, 2, 3, 4):
+        assert sizes[f'dec{level}'] == sizes[f'enc{level}'], (
+            f"Decoder level {level} has size {sizes[f'dec{level}']} but its skip connection "
+            f"has size {sizes[f'enc{level}']}"
+        )
+
+def test_unet_is_deterministic_in_eval_mode():
+    """
+    GIVEN: a UNet in eval mode (dropout off) 
+    WHEN: the same input goes through it twice
+    THEN: the two outputs are identical and there is no randomness in the forward pass
+    """
+    torch.manual_seed(42) # for reproducibility across runs
+    model = UNet().eval() # switch to evaluation mode (do inference) and no training mode, 
+    x = torch.rand(4, 2, 300, 300)
+
+    with torch.no_grad(): # disable gradient calculation for inference
+        first = model(x) # do the first forward pass
+        second = model(x) # do the second forward pass with the same input
+
+    assert torch.equal(first, second), "An eval mode forward pass should be deterministic"
+
+def test_unet_dropout_is_active_in_train_mode():
+    """
+    GIVEN: a UNet in train mode, which contains dropout layers
+    WHEN: the same input goes through it twice
+    THEN: the outputs differ, because a different set of channels is dropped out each time
+    """
+    torch.manual_seed(42) # for reproducibility across runs
+    model = UNet().train() # switch to training mode (for dropout, batchnorm, etc.)
+    x = torch.rand(4, 2, 300, 300)
+
+    with torch.no_grad():
+        first = model(x) # do the first forward pass
+        second = model(x) # do the second forward pass with the same input
+
+    assert not torch.allclose(first, second), "Dropout should make changes in train mode passes"
+
+
 """
 ====================================================================================================
 Tests for _match_size function of UNet class in the "unet.py" 
@@ -370,3 +514,9 @@ def test_match_size_matches_handy_calculated_bilinear_interpolation():
     f"The UNet._match_size output doesn't match the handy-calculated values of the bilinear interpolation, "
     f"expected {handy_calculated}, got {matched_size}"
     )
+
+
+                            
+                        
+    
+            
