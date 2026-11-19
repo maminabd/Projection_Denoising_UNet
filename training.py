@@ -31,8 +31,7 @@ rotation_probability = 0.5  # Probability of applying rotation to each training 
 def parse_args():
     """Command-line arguments: the options that change from one run to the next."""
     parser = argparse.ArgumentParser(description="Train the U-Net projection denoiser")
-    parser.add_argument('--input', required=True, help="Directory with the noisy input .npy files")
-    parser.add_argument('--target', required=True, help="Directory with the clean target .npy files")
+    parser.add_argument('--dataset', required=True, help="Directory to the dataset folder containing 'input' and 'target' subfolders")
     parser.add_argument('--epochs', type=int, default=100, help="Number of training epochs")
     parser.add_argument('--batch', type=int, default=8, help="Batch size")
     parser.add_argument('--save_model_every', type=int, default=25, help="Save a checkpoint every N epochs")
@@ -119,8 +118,12 @@ def main():
     log_file = "log.txt"
     plot_file = "loss_history.png"
 
+    # get input/target directories from the fixed subfolder names,
+    input_dir = os.path.join(args.dataset, 'input')
+    target_dir = os.path.join(args.dataset, 'target')
+
     # Data processing
-    input_files, target_files = find_paired_files(args.input, args.target)
+    input_files, target_files = find_paired_files(input_dir, target_dir)
 
     # check if the datasets are acceptable
     check_files(input_files, target_files)
