@@ -26,16 +26,23 @@ MAE_WEIGHT, SSIM_WEIGHT, GRADIENT_WEIGHT = 0.5, 0.25, 0.25
 
 # Data Augmentation Configuration
 use_augmentation = True  # Enable/disable rotation augmentation
-rotation_probability = 0.5  # Probability of applying rotation to each training sample
+rotation_probability = 0.1  # Probability of applying rotation to each training sample
+flip_probability=0.1 # Probability of applying horizontal and/or vertical flip to each training sample
 
 def parse_args():
     """Command-line arguments: the options that change from one run to the next."""
     parser = argparse.ArgumentParser(description="Train the U-Net projection denoiser")
-    parser.add_argument('--dataset', required=True, help="Directory to the dataset folder containing 'input' and 'target' subfolders")
-    parser.add_argument('--epochs', type=int, default=100, help="Number of training epochs")
-    parser.add_argument('--batch', type=int, default=8, help="Batch size")
-    parser.add_argument('--save_model_every', type=int, default=25, help="Save a checkpoint every N epochs")
-    parser.add_argument('--resume', default=None, help="Checkpoint (.pth) to continue training from")
+    parser.add_argument('--dataset', required=True, help="Directory to the dataset folder containing 'input' and 'target' subfolders. Default: None (required)")
+    parser.add_argument('--epochs', type=int, default=100, help="Number of training epochs. Default: 100")
+    parser.add_argument('--batch', type=int, default=8, help="Batch size. Default: 8")
+    parser.add_argument('--save_model_every', type=int, default=25, help="Save a checkpoint every N epochs. Default: 25")
+    parser.add_argument('--plot_every', type=int, default=5, help="Plot training history every N epochs. Default: 5")
+    parser.add_argument('--resume', default=None, help="Path to checkpoint (.pth) to continue training from. Default: None (start training from scratch)")
+    parser.add_argument('--check_dataset', default=None, help="Check if the dataset is valid and has the expected shape and " \
+                                                            "intensity range before training. For the first run, it is " \
+                                                            "recommended to check the dataset first (e.g. --check_dataset 1). " \
+                                                            "If the dataset is valid, this option can be omitted in" \
+                                                            " subsequent runs. Default: None (do not check the dataset)")
                                                                                                     
     return parser.parse_args()
                
@@ -60,7 +67,7 @@ def make_loader(input_files, target_files, batch_size, shuffle, device, use_augm
     path_pairs = list(zip(input_files, target_files))
 
     dataloader = DataLoader(path_pairs, batch_size=batch_size, shuffle=shuffle,
-                      collate_fn= lambda batch: collate_augmented_batch(path_pairs = batch, use_augmentation=use_augmentation, rotation_probability=rotation_probability) if use_augmentation else collate_batch(path_pairs = batch),
+                      collate_fn= lambda batch: collate_augmented_batch(path_pairs = batch, use_augmentation=use_augmentation, rotation_probability=rotation_probability, flip_probability=flip_probability) if use_augmentation else collate_batch(path_pairs = batch),
                       num_workers=NUM_WORKERS, pin_memory=device.type == 'cuda')
 
     return dataloader
@@ -125,8 +132,10 @@ def main():
     # Data processing
     input_files, target_files = find_paired_files(input_dir, target_dir)
 
-    # check if the datasets are acceptable
-    check_files(input_files, target_files)
+    # check if the training dataset is acceptable.
+    if args.check_dataset:
+        check_files(input_files, target_files)
+        print(f"\nDataset in '{args.dataset}' is valid and has the expected shape and intensity range.")
 
     # split the datasets in to training and validation sets.
     train_in, train_tg, val_in, val_tg = split_files(input_files, target_files, VAL_SPLIT, SEED)
@@ -234,10 +243,18 @@ def main():
                     print(save_model_message, flush=True)
                     # append the message to the log file
                     print(save_model_message, file=open(log_file, mode='a', encoding='utf-8'))
+
+        if (epoch + 1) % args.plot_every == 0:
+            plot_history(train_history, val_history, lr_history, start_epoch + 1, plot_file)
+
+    # ------------------------------------------------------------------
+    # End of training
+    # ------------------------------------------------------------------
     
     # once the training finished, save the plot from trends of training loss and validation loss values wrt epochs and ...
     # plot the learning rate schedule wrt epochs
-    plot_history(train_history, val_history, lr_history, plot_file)
+    if train_history:
+         plot_history(train_history, val_history, start_epoch + 1, lr_history, plot_file)
 
     ending_message = (
         f"\nTraining finished after {args.epochs} epochs.\n"
