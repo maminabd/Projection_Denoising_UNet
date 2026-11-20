@@ -26,7 +26,7 @@ def get_device():
     return device
 
 
-def plot_history(train_losses, val_losses, learning_rates, filename):
+def plot_history(train_losses, val_losses, learning_rates, start_epoch, filename):
     
     """
     Save a picture of 2 plots: 1- training/validation loss wrt epochs and 2- learning rate wrt epochs
@@ -38,8 +38,8 @@ def plot_history(train_losses, val_losses, learning_rates, filename):
         filename: name of picture of the 2 plots to be saved.
     """
     
-    epochs_range = range(1, len(train_losses)+1)
-    last_epoch = len(train_losses)
+    epochs_range = range(start_epoch, start_epoch + len(train_losses))
+    last_epoch = start_epoch + len(train_losses) - 1
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
 
