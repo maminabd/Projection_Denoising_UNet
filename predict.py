@@ -17,12 +17,12 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Denoise unseen projections with a trained U-Net")
     parser.add_argument('--noisy', required=True,
                         help="Directory with the noisy .npy files to denoise them")
-    parser.add_argument('--noiseless', required=True,
+    parser.add_argument('--groundtruth', required=True,
                         help="Directory with the noiseless ground truth .npy files (same names as --noisy)")
     parser.add_argument('--model', required=True,
                         help="Trained model (.pth) saved by training.py")
-    parser.add_argument('--output', default='test_results',
-                        help="Directory where the results are saved")
+    parser.add_argument('--output', default='./predicted_results',
+                        help="Directory where the results will be saved (default: ./predicted_results)")
     return parser.parse_args()
 
 
@@ -32,8 +32,8 @@ def main():
 
     device = get_device()
 
-    noisy_files, noisless_files = find_paired_files(args.noisy, args.noiseless)
-    check_files(noisy_files, noisless_files)
+    noisy_files, groundtruth_files = find_paired_files(args.noisy, args.groundtruth)
+    check_files(noisy_files, groundtruth_files)
 
     # gather all noisy .npy files of the given directory and sort them to be processed
     noisy_dataset = sorted(glob.glob(os.path.join(args.noisy,"*.npy")))
@@ -56,7 +56,7 @@ def main():
     
     os.makedirs(args.output, exist_ok=True)
     all_differences = []
-    for noisy_projection, noisless_projection in zip(noisy_files, noisless_files):
+    for noisy_projection, groundtruth_projection in zip(noisy_files, groundtruth_files):
         
         # load the noisy npy as a tensor of shape (C, H, W)
         noisy_tensor = load_as_tensor(noisy_projection) 
@@ -76,7 +76,7 @@ def main():
         # save the denoised tensor as a .npy file
         np.save (os.path.join(args.output, os.path.basename(noisy_projection)), denoised.numpy())
 
-        ground_truth = load_as_tensor(noisless_projection)
+        ground_truth = load_as_tensor(groundtruth_projection)
 
         full_name = os.path.basename(noisy_projection) # it gives the filename with its extension, e.g. "proj_1.npy"
         full_name_split = os.path.splitext(full_name) # it split the filename and gives a tuple: ("proj_1", ".npy")
@@ -84,7 +84,7 @@ def main():
         comparison_pic_name = os.path.join(args.output, f"{name}.png")
 
         # create the comparison picture and return the mean absolute differences
-        mean_differences = projs_comparison(denoised, ground_truth, filename=comparison_pic_name, title=name)
+        mean_differences = projs_comparison(noisy_tensor, denoised, ground_truth, filename=comparison_pic_name, title=name)
 
         all_differences.append(mean_differences)
 
