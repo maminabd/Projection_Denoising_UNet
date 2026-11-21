@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import torch
 
 
-def get_device():
+def get_device(): # pragma: no cover
     
     """
     Select CUDA device if available and print GPU info, otherwise use CPU.
@@ -26,7 +26,7 @@ def get_device():
     return device
 
 
-def plot_history(train_losses, val_losses, learning_rates, start_epoch, filename):
+def plot_history(train_losses, val_losses, learning_rates, start_epoch, filename):  # pragma: no cover
     
     """
     Save a picture of 2 plots: 1- training/validation loss wrt epochs and 2- learning rate wrt epochs
@@ -65,16 +65,18 @@ def plot_history(train_losses, val_losses, learning_rates, start_epoch, filename
     plt.close(fig)
 
 
-def projs_comparison(denoised, ground_truth, filename, title):
+def projs_comparison(noisy_tensor, denoised, ground_truth, filename, title): # pragma: no cover
     """
     Save a picture comparing the denoised projection with the ground truth.
 
-    The picture has 2 rows and 3 columns. Each row corresponds to a channel (LE, HE).
-    The first column shows the denoised projection,
-    The second column shows the ground truth (noiseless projection),
-    The third column shows the absolute difference map between the denoised projection and the ground truth.
+    The picture has 2 rows and 4 columns. Each row corresponds to a channel (LE, HE).
+    The first column shows the noisy projection,
+    The second column shows the denoised projection,
+    The third column shows the ground truth (noiseless projection),
+    The fourth column shows the absolute difference map between the denoised projection and the ground truth.
 
     Args:
+        noisy_tensor: Tensor of shape (C, H, W).
         denoised: Tensor of shape (C, H, W).
         ground_truth: Tensor of shape (C, H, W).
         filename: Output picture file.
@@ -91,33 +93,41 @@ def projs_comparison(denoised, ground_truth, filename, title):
     # converts that tensor to a Python list i.e. [mean_LE, mean_HE]
     mean_differences = mean_differences_tensor.tolist()
 
-    fig, axes = plt.subplots(2, 3, figsize=(18, 11), squeeze=False)
+    fig, axes = plt.subplots(2, 4, figsize=(18, 11), squeeze=False)
 
     # --- Row 0: LE channel ---
-    im00 = axes[0, 0].imshow(denoised[0].numpy(), cmap='gray')
-    axes[0, 0].set_title("Denoised (LE)")
+    im00 = axes[0, 0].imshow(noisy_tensor[0].numpy(), cmap='gray')
+    axes[0, 0].set_title("Noisy (LE)")
     fig.colorbar(im00, ax=axes[0, 0], fraction=0.046, pad=0.04)
 
-    im01 = axes[0, 1].imshow(ground_truth[0].numpy(), cmap='gray')
-    axes[0, 1].set_title("Ground truth (LE)")
-    fig.colorbar(im01, ax=axes[0, 1], fraction=0.046, pad=0.04)
+    im00 = axes[0, 1].imshow(denoised[0].numpy(), cmap='gray')
+    axes[0, 1].set_title("Denoised (LE)")
+    fig.colorbar(im00, ax=axes[0, 1], fraction=0.046, pad=0.04)
 
-    im02 = axes[0, 2].imshow(difference[0].numpy(), cmap='gray')
-    axes[0, 2].set_title(f"Absolute difference (LE), mean = {mean_differences[0]:.6f}")
-    fig.colorbar(im02, ax=axes[0, 2], fraction=0.046, pad=0.04)
+    im01 = axes[0, 2].imshow(ground_truth[0].numpy(), cmap='gray')
+    axes[0, 2].set_title("Ground truth (LE)")
+    fig.colorbar(im01, ax=axes[0, 2], fraction=0.046, pad=0.04)
+
+    im02 = axes[0, 3].imshow(difference[0].numpy(), cmap='gray')
+    axes[0, 3].set_title(f"Absolute difference (LE), mean = {mean_differences[0]:.6f}")
+    fig.colorbar(im02, ax=axes[0, 3], fraction=0.046, pad=0.04)
 
     # --- Row 1: HE channel ---
-    im10 = axes[1, 0].imshow(denoised[1].numpy(), cmap='gray')
-    axes[1, 0].set_title("Denoised (HE)")
+    im10 = axes[1, 0].imshow(noisy_tensor[1].numpy(), cmap='gray')
+    axes[1, 0].set_title("Noisy (HE)")
     fig.colorbar(im10, ax=axes[1, 0], fraction=0.046, pad=0.04)
 
-    im11 = axes[1, 1].imshow(ground_truth[1].numpy(), cmap='gray')
-    axes[1, 1].set_title("Ground truth (HE)")
+    im11 = axes[1, 1].imshow(denoised[1].numpy(), cmap='gray')
+    axes[1, 1].set_title("Denoised (HE)")
     fig.colorbar(im11, ax=axes[1, 1], fraction=0.046, pad=0.04)
 
-    im12 = axes[1, 2].imshow(difference[1].numpy(), cmap='gray')
-    axes[1, 2].set_title(f"Absolute difference (HE), mean = {mean_differences[1]:.6f}")
+    im12 = axes[1, 2].imshow(ground_truth[1].numpy(), cmap='gray')
+    axes[1, 2].set_title("Ground truth (HE)")
     fig.colorbar(im12, ax=axes[1, 2], fraction=0.046, pad=0.04)
+
+    im13 = axes[1, 3].imshow(difference[1].numpy(), cmap='gray')
+    axes[1, 3].set_title(f"Absolute difference (HE), mean = {mean_differences[1]:.6f}")
+    fig.colorbar(im13, ax=axes[1, 3], fraction=0.046, pad=0.04)
 
     fig.suptitle(title)
     fig.tight_layout()
@@ -169,7 +179,7 @@ def load_checkpoint(path, model, optimizer, scheduler, device):
     model_param = checkpoint['model_state_dict']
     optimizer_param = checkpoint['optimizer_state_dict']
     scheduler_param = checkpoint['scheduler_state_dict']
-    checkpointed_epoch = checkpoint['checkpointed_epoch']
+    checkpointed_epoch = checkpoint['checkpointed_epoch'] + 1 # resume from the next epoch after the checkpointed one
     checkpointed_val_loss = checkpoint.get('val_loss') # .get() is used because 'val_loss' is stored by **extra.
 
     # load those parameters into their corresponding objects.
