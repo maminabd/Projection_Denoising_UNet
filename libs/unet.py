@@ -27,26 +27,32 @@ class ResBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(ResBlock, self).__init__()
 
-        self.bn = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU(inplace=True)
 
         # Project to the number of channels of the layer
         self.proj_conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
 
-        # Convolution within the layer
-        self.conv = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+        # Each BatchNorm of ResBlock normalizes a different activation distribution, 
+        # so each one needs its own parameters and running statistics 
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        self.bn3 = nn.BatchNorm2d(out_channels)
+
+        # Convolutions inside a layer (separate weights for each convolution)
+        self.conv1 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
 
 
     def forward(self, x):
 
         out = self.proj_conv(x)
         residual = out # save it as residual.
-        out = self.relu(self.bn(out))
+        out = self.relu(self.bn1(out))
 
         # 2 conv layers
-        out = self.conv(out)
-        out = self.relu(self.bn(out))
-        out = self.bn(self.conv(out))
+        out = self.conv1(out)
+        out = self.relu(self.bn2(out))
+        out = self.bn3(self.conv2(out))
         out = self.relu(out + residual) # Add the residual and final activation
 
         return out
