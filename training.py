@@ -1,19 +1,16 @@
 
 import os
-import numpy as np
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from libs.dataset import (check_files, find_paired_files, split_files, 
-                          collate_batch, load_as_tensor, collate_augmented_batch)
+                          collate_batch, collate_augmented_batch)
 import torch.nn.functional as F
 from libs.unet import UNet
 from libs.utils import (save_checkpoint, get_device, plot_history, load_checkpoint)
 import argparse
 from libs.losses import denoising_loss
 import time
-from libs.data_augmentation import rotation_augmentation
-import random
 
 # hyperparameters and data paths
 VAL_SPLIT = 0.2 # fraction of the files used for validation
@@ -91,7 +88,6 @@ def run_epoch(model, loader, device, optimizer=None):
 
     training = optimizer is not None
     model.train(training)
-    np.random.seed(SEED)
     total_loss = 0.0
     n_batches = 0
 
@@ -159,7 +155,7 @@ def main():
         if os.path.exists(args.resume):
             checkpointed_epoch, checkpointed_val_loss = load_checkpoint(args.resume, model, optimizer, scheduler, device)
             
-            start_epoch = checkpointed_epoch + 1 # start from the next epoch after the checkpointed epoch.
+            start_epoch = checkpointed_epoch # load_checkpoint already returns the epoch after the checkpointed one.
             best_val_loss = checkpointed_val_loss # the last validation loss stored in the checkpoint is used as a reference for the best validation loss so far.
 
             message_resuming= (f"\n\nContinuing from checkpoint {args.resume}, "
@@ -254,7 +250,7 @@ def main():
     # once the training finished, save the plot from trends of training loss and validation loss values wrt epochs and ...
     # plot the learning rate schedule wrt epochs
     if train_history:
-         plot_history(train_history, val_history, start_epoch + 1, lr_history, plot_file)
+         plot_history(train_history, val_history, lr_history, start_epoch + 1, plot_file)
 
     ending_message = (
         f"\nTraining finished after {args.epochs} epochs.\n"
@@ -264,7 +260,7 @@ def main():
     )
     print(ending_message, flush=True)
     # append the ending message to the log file
-    print(ending_message, file=open(log_file, mode='a' if args.resume else 'w', encoding='utf-8'))
+    print(ending_message, file=open(log_file, mode='a', encoding='utf-8'))
 
 
 if __name__ == '__main__':
