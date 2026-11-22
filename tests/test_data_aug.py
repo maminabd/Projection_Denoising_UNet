@@ -276,4 +276,31 @@ def test_flipping_respects_the_channels_order(flip_type):
     assert torch.allclose(tgt_aug[0], torch.full((300, 300), 3.0)), \
         "tgt channel 0 changed value after flipping"
     assert torch.allclose(tgt_aug[1], torch.full((300, 300), 4.0)), \
-        "tgt channel 1 changed value after flipping"     
+        "tgt channel 1 changed value after flipping"
+
+
+@pytest.mark.parametrize("inp, tgt", ALL_PROJECTION_PAIRS)
+def test_rotation_no_loss_of_body_texture(inp, tgt, k=1):
+    """
+    GIVEN: the mouse projections are used as input and as target
+    WHEN: the rotation_augmentation is applied
+    THEN: the projection after rotating 360 degrees (4 times 90 degrees) 
+          is identical to the original projection,
+
+    Further explanation:
+
+        after rotating projections 4 times 90 degrees stepwise, if any part of the mouse body goes outside in any 90 degrees rotation,
+        that lost region cannot be recovered anymore, and after 4 times 90 degrees rotation, when it get to the initial form, 
+        there shouldn't be any difference between the original and the final rotated projection.
+    """
+
+    number_rotate = 4 # 360/90 = 4 times rotation
+    inp_original = inp
+    tgt_original = tgt
+    for _ in range(number_rotate):
+        inp_aug, tgt_aug = rotation_augmentation(inp, tgt, 1) # rotate 90 degrees each time
+        inp = inp_aug
+        tgt = tgt_aug
+
+    assert torch.equal(inp, inp_original), f"there is loss of body texture in input after rotating the projection"
+    assert torch.equal(tgt, tgt_original), f"there is loss of body texture in target after rotating the projection"     
