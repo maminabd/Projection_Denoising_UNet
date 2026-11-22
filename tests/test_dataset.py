@@ -57,10 +57,11 @@ def test_check_files_accepts_valid_files(tmp_path):
 
     check_files(input_list, target_list)
 
-def test_check_files_invalid_intensity_values_raises(tmp_path):
+def test_check_files_invalid_intensity_values_raises_for_inputs(tmp_path):
 
     """
-    GIVEN: input and targets are .npy files with intensity values outside the range [0, 1]
+    GIVEN: input and targets .npy files and
+           intensity values of inputs are outside the range [0, 1]
     WHEN: check_files is called
     THEN: a ValueError is raised
     """
@@ -71,16 +72,43 @@ def test_check_files_invalid_intensity_values_raises(tmp_path):
     input_dir.mkdir(parents=True, exist_ok=True)
     input_path = input_dir / "mouse_1.npy"
     input_path_str = str(input_path)
-    np.save(input_path, (np.random.randn(*IMAGE_SHAPE)).astype(np.float32)) # values outside range [0, 1]
+    np.save(input_path, np.full(IMAGE_SHAPE, 1.5, dtype=np.float32)) # values outside range [0, 1]
 
     target_dir = tmp_path / "target_data"
     target_dir.mkdir(parents=True, exist_ok=True)
     target_path = target_dir / "mouse_1.npy"
     target_path_str = str(target_path)
-    np.save(target_path, (np.random.randn(*IMAGE_SHAPE)).astype(np.float32)) # values outside range [0, 1]
+    np.save(target_path, np.full(IMAGE_SHAPE, 0.5, dtype=np.float32)) # values inside range [0, 1]
+      
+    with pytest.raises(ValueError, match="intensity"):
+        check_files([input_path_str], [target_path_str])
+
+def test_check_files_invalid_intensity_values_raises_for_targets(tmp_path):
+
+    """
+    GIVEN: input and targets .npy files and
+           intensity values of targets are outside the range [0, 1]
+    WHEN: check_files is called
+    THEN: a ValueError is raised
+    """
+    torch.manual_seed(42)
+
+    # create directories and save the .npy files
+    input_dir = tmp_path / "input_data"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    input_path = input_dir / "mouse_1.npy"
+    input_path_str = str(input_path)
+    np.save(input_path, np.full(IMAGE_SHAPE, 0.5, dtype=np.float32)) # values inside range [0, 1]
+
+    target_dir = tmp_path / "target_data"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / "mouse_1.npy"
+    target_path_str = str(target_path)
+    np.save(target_path, np.full(IMAGE_SHAPE, 1.5, dtype=np.float32)) # values outside range [0, 1]
         
     with pytest.raises(ValueError, match="intensity"):
         check_files([input_path_str], [target_path_str])
+
 
 def test_check_files_length_mismatch_raises(tmp_path):
 
@@ -111,10 +139,11 @@ def test_check_files_length_mismatch_raises(tmp_path):
         check_files(input_files, target_files)
 
 
-def test_check_files_wrong_shape_raises(tmp_path):
+def test_check_files_wrong_shape_raises_for_inputs(tmp_path):
 
     """
-    GIVEN: a .npy file as input whose shape is not the expected shape i.e. (300, 300, 2)
+    GIVEN: input and targets .npy files and
+           shape of inputs are not the expected shape i.e. (300, 300, 2)
     WHEN: check_files is called
     THEN: a ValueError naming the expected shape is raised
     """
@@ -135,10 +164,110 @@ def test_check_files_wrong_shape_raises(tmp_path):
     with pytest.raises(ValueError, match="expected shape"):
         check_files(input_list, target_list)
 
-def test_find_paired_files_missing_files_raises(tmp_path):
+def test_check_files_wrong_shape_raises_for_targets(tmp_path):
+
+    """
+    GIVEN: input and targets .npy files and
+           shape of targets are not the expected shape i.e. (300, 300, 2)
+    WHEN: check_files is called
+    THEN: a ValueError naming the expected shape is raised
+    """
+
+    # create directories and save the .npy files
+    input_dir = tmp_path / "input_data"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    input_path = input_dir / "mouse_1.npy"
+    input_list = [str(input_path)]
+    np.save(input_path, np.full(IMAGE_SHAPE, 0.5, dtype=np.float32))  # wrong shape
+
+    target_dir = tmp_path / "target_data"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / "mouse_1.npy"
+    target_list = [str(target_path)]
+    np.save(target_path, np.full((300, 300), 0.5, dtype=np.float32))  # correct shape
+
+    with pytest.raises(ValueError, match="expected shape"):
+        check_files(input_list, target_list)
+
+def test_find_paired_files_missing_npyfiles_raises_for_input(tmp_path):
+
+    """
+    GIVEN: input directory with no file that matching the pattern of *.npy
+    WHEN: find_paired_files is called
+    THEN: a FileNotFoundError is raised
+    """
+
+    # create directories
+    input_dir =  tmp_path / "input"
+    target_dir = tmp_path / "target"
+
+    input_dir.mkdir()
+    target_dir.mkdir()
+
+    # save the .npy files in the directories
+    # input directory has no .npy files, but has a .txt file
+    (input_dir / "mouse.txt").write_text("hello world\n")
+
+    # target directory has .npy files
+    np.save(target_dir / "mouse_1.npy", np.full(IMAGE_SHAPE, 0.5, dtype=np.float32))
+    np.save(target_dir / "mouse_2.npy", np.full(IMAGE_SHAPE, 0.5, dtype=np.float32))
+
+    with pytest.raises(FileNotFoundError, match="No files"):
+        find_paired_files(str(input_dir), str(target_dir))
+
+def test_find_paired_files_missing_npyfiles_raises_for_target(tmp_path):
 
     """
     GIVEN: target directory with no file that matching the pattern of *.npy
+    WHEN: find_paired_files is called
+    THEN: a FileNotFoundError is raised
+    """
+
+    # create directories
+    input_dir =  tmp_path / "input"
+    target_dir = tmp_path / "target"
+
+    input_dir.mkdir()
+    target_dir.mkdir()
+
+    # save the .npy files in the directories
+    # input directory has .npy files
+    np.save(input_dir / "mouse_1.npy", np.full(IMAGE_SHAPE, 0.5, dtype=np.float32))
+    np.save(input_dir / "mouse_2.npy", np.full(IMAGE_SHAPE, 0.5, dtype=np.float32))
+
+    # target directory has no .npy files, but has a .txt file
+    (target_dir / "mouse.txt").write_text("hello world\n")
+
+    with pytest.raises(FileNotFoundError, match="No files"):
+        find_paired_files(str(input_dir), str(target_dir))
+
+def test_find_paired_files_missing_files_raises_for_input(tmp_path):
+
+    """
+    GIVEN: target directory has .npy files but input directory is empty
+    WHEN: find_paired_files is called
+    THEN: a FileNotFoundError is raised
+    """
+
+    # create directories
+    input_dir =  tmp_path / "input"
+    target_dir = tmp_path / "target"
+
+    input_dir.mkdir()
+    target_dir.mkdir()
+
+    # save the .npy files in the directories
+    # input directory is left empty for this test.
+    np.save(target_dir / "mouse_1.npy", np.full(IMAGE_SHAPE, 0.5, dtype=np.float32))
+    np.save(target_dir / "mouse_2.npy", np.full(IMAGE_SHAPE, 0.5, dtype=np.float32))
+
+    with pytest.raises(FileNotFoundError, match="No files"):
+        find_paired_files(str(input_dir), str(target_dir))
+
+def test_find_paired_files_missing_files_raises_for_target(tmp_path):
+
+    """
+    GIVEN: input directory has .npy files but target directory is empty
     WHEN: find_paired_files is called
     THEN: a FileNotFoundError is raised
     """
@@ -244,26 +373,58 @@ def test_find_paired_files_name_mismatch_raises(tmp_path):
         find_paired_files(str(input_dir), str(target_dir))
 
 
-def test_split_files_sizes():
-
+def test_split_files_rounding_matches_hand_computed_sizes_secondhalfdecimal():
     """
-    GIVEN: a list of paired files and a validation split fraction
+    GIVEN: a list of 7 file pairs and a validation split of 0.25
     WHEN: split_files is called
-    THEN: the train and validation sets should have expected length.
+    THEN: 2 files go to validation and 5 to training
+
+    calculation by hand: 
+    
+        # 7 files x 0.25 = 1.75 (0.75 is in the second half between 1 and 2)
+        the validation size is rounded up, ceil(0.25 * 7) = ceil(1.75) = 2, and the training
+        size is the rest = 5.
     """
+    number_of_files = 7
+    # splitting 7 files with 0.25 yields decimal
+    validation_split= 0.25 
 
-    # create list of 21 files (splitting with 0.25 yields decimal) for input and target
-    input_files = [f"mouse_{i}.npy" for i in range(21)]
-    target_files = [f"mouse_{i}.npy" for i in range(21)]
+    input_files = [f"mouse_{i}.npy" for i in range(number_of_files)]
+    target_files = [f"mouse_{i}.npy" for i in range(number_of_files)]
 
-    # split input and target to training set and validation set with split fration of 0.25 (validation is 0.25, training is 0.75)
-    train_inp, train_tg, val_inp, val_tg = split_files(input_files, target_files, validation_split=0.25, seed=42)
+    # split input and target to training set and validation set with
+    # split fration of 0.25 (validation is 0.25)
+    train_in, train_tgt, val_in, val_tgt = split_files(input_files, target_files, validation_split=validation_split, seed=42)
 
-    # for deciama values it ceils (ceil(5.25) = 6)
-    assert len(train_inp) == len(train_tg) == 15, f"Expected 15 training files, got {len(train_inp)}"
-    assert len(val_inp) == len(val_tg) == 6, f"Expected 6 validation files, got {len(val_inp)}"
+    assert (len(train_in), len(val_in)) == (5, 2), f"Expected 5 training and 2 validation files, got {len(train_in)} and {len(val_in)}"
+    assert (len(train_tgt), len(val_tgt)) == (5, 2), f"Expected 5 training and 2 validation files, got {len(train_tgt)} and {len(val_tgt)}"
+    
+def test_split_files_rounding_matches_hand_computed_sizes_firsthalfdecimal():
+    """
+    GIVEN: a list of 7 file pairs and a validation split of 0.2
+    WHEN: split_files is called
+    THEN: 2 files go to validation and 5 to training
 
+    calculation by hand: 
 
+    # 7 files x 0.2 = 1.4 (0.4 is in the first half between 1 and 2)
+    the validation size is rounded up, ceil(0.2 * 7) = ceil(1.4) = 2, and the training
+    size is the rest = 5.
+    """
+    number_of_files = 7
+    # splitting 7 files with 0.2 yields decimal
+    validation_split = 0.2 
+
+    input_files = [f"mouse_{i}.npy" for i in range(number_of_files)]
+    target_files = [f"mouse_{i}.npy" for i in range(number_of_files)]
+
+    # split input and target to training set and validation set with
+    # split fration of 0.2 (validation is 0.2)
+    train_in, train_tgt, val_in, val_tgt = split_files(input_files, target_files, validation_split=validation_split, seed=42)
+
+    assert (len(train_in), len(val_in)) == (5, 2), f"Expected 5 training and 2 validation files, got {len(train_in)} and {len(val_in)}"
+    assert (len(train_tgt), len(val_tgt)) == (5, 2), f"Expected 5 training and 2 validation files, got {len(train_tgt)} and {len(val_tgt)}"
+    
 def test_split_files_coverage():
 
     """
@@ -335,7 +496,8 @@ def test_collate_batch_returns_tensor(tmp_path):
     
     path_pairs = []
     # consider batch size is 8
-    for i in range(8):
+    batch_size = 8
+    for i in range(batch_size):
         inp_file = input_dir / f"mouse_{i}.npy"
         np.save(inp_file, np.full(IMAGE_SHAPE, 0.5, dtype=np.float32))
         tg_file = target_dir / f"mouse_{i}.npy"
@@ -364,7 +526,8 @@ def test_collate_batch_stacks_pairs(tmp_path):
 
     path_pairs = []
     # consider batch size is 8
-    for i in range(8):
+    batch_size = 8
+    for i in range(batch_size):
         inp_file = input_dir / f"mouse_{i}.npy"
         np.save(inp_file, np.full(IMAGE_SHAPE, 0.5, dtype=np.float32))
         tg_file = target_dir / f"mouse_{i}.npy"
@@ -373,8 +536,8 @@ def test_collate_batch_stacks_pairs(tmp_path):
 
     inputs, targets = collate_batch(path_pairs)
 
-    assert inputs.shape == (8, 2, 300, 300), f"Unexpected inputs shape: {tuple(inputs.shape)}"
-    assert targets.shape == (8, 2, 300, 300), f"Unexpected targets shape: {tuple(targets.shape)}"
+    assert inputs.shape == (batch_size, 2, 300, 300), f"Unexpected inputs shape: {tuple(inputs.shape)}"
+    assert targets.shape == (batch_size, 2, 300, 300), f"Unexpected targets shape: {tuple(targets.shape)}"
 
     
 def test_collate_batch_casts_to_float32(tmp_path):
@@ -655,3 +818,32 @@ def test_collate_augmented_batch_rotation_distribution_is_uniform(path_pair):
     assert abs(proportion[3] - expected_proportion) < tolerance, (
                 f"Rotation k=3 occurred {proportion[3]:.2%} of the time, "
                 f"expected close to {expected_proportion:.2%}")
+
+def test_collate_augmented_batch_stacks_pairs(tmp_path):
+    """
+    GIVEN: a list of (input_path, target_path) pairs
+    WHEN: collate_batch is called
+    THEN: the stacked data (batch) of inputs and targets have
+          shape of (Batch size, number of Channels=2, H=300, W=300)
+    """
+
+    # create directories and files
+    input_dir =  tmp_path / "input"
+    target_dir = tmp_path / "target"
+    input_dir.mkdir()
+    target_dir.mkdir()
+
+    path_pairs = []
+    # consider batch size is 8
+    batch_size = 8
+    for i in range(batch_size):
+        inp_file = input_dir / f"mouse_{i}.npy"
+        np.save(inp_file, np.full(IMAGE_SHAPE, 0.5, dtype=np.float32))
+        tg_file = target_dir / f"mouse_{i}.npy"
+        np.save(tg_file, np.full(IMAGE_SHAPE, 0.5, dtype=np.float32))
+        path_pairs.append((inp_file, tg_file))
+
+    inputs, targets = collate_augmented_batch(path_pairs, use_augmentation=False)
+
+    assert inputs.shape == (batch_size, 2, 300, 300), f"Unexpected inputs shape: {tuple(inputs.shape)}"
+    assert targets.shape == (batch_size, 2, 300, 300), f"Unexpected targets shape: {tuple(targets.shape)}"
