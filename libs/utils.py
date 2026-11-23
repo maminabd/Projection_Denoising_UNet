@@ -1,12 +1,17 @@
 
+import logging
 import matplotlib.pyplot as plt
 import torch
+
+logger = logging.getLogger(__name__)
+
+CHANNEL_NAMES = ('LE', 'HE')  # names of the 2 channels (Low Energy and High Energy) of the projections
 
 
 def get_device(): # pragma: no cover
     
     """
-    Select CUDA device if available and print GPU info, otherwise use CPU.
+    Select CUDA device if available and log GPU info, otherwise use CPU.
 
     Args:
         None
@@ -16,13 +21,13 @@ def get_device(): # pragma: no cover
     """
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"\nUsing device: {device}")
+    logger.info("Using device: %s", device)
     if torch.cuda.is_available():
-        print(f"\nGPU: {torch.cuda.get_device_name(0)}")
-        print(f"CUDA Version: {torch.version.cuda}")
-        print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+        logger.info("GPU: %s", torch.cuda.get_device_name(0))
+        logger.info("CUDA Version: %s", torch.version.cuda)
+        logger.info("GPU Memory: %.1f GB", torch.cuda.get_device_properties(0).total_memory / 1e9)
     else:
-        print("\nCUDA not available, using CPU")
+        logger.info("CUDA not available, using CPU")
     return device
 
 
@@ -35,6 +40,7 @@ def plot_history(train_losses, val_losses, learning_rates, start_epoch, filename
         train_losses: list of the training loss of each epoch.
         val_losses: list of the validation loss of each epoch.
         learning_rates: list of the learning rate of each epoch.
+        start_epoch: number of the epoch of the first element of the lists (the x axis starts from it).
         filename: name of picture of the 2 plots to be saved.
     """
     
@@ -65,7 +71,41 @@ def plot_history(train_losses, val_losses, learning_rates, start_epoch, filename
     plt.close(fig)
 
 
-def projs_comparison(noisy_tensor, denoised, ground_truth, filename, title): # pragma: no cover
+def absolute_difference(denoised, ground_truth):
+    """
+    Pixel-wise absolute difference between a denoised projection and its ground truth.
+
+    Args:
+        denoised: Tensor of shape (C, H, W).
+        ground_truth: Tensor of shape (C, H, W).
+
+    Returns:
+        Tensor of shape (C, H, W) with the absolute differences.
+    """
+
+    return (denoised - ground_truth).abs()
+
+
+def mean_absolute_difference(denoised, ground_truth):
+    """
+    Mean absolute difference between a denoised projection and its ground truth, for each channel.
+
+    Args:
+        denoised: Tensor of shape (C, H, W).
+        ground_truth: Tensor of shape (C, H, W).
+
+    Returns:
+        List with the mean absolute difference of each channel, i.e. [mean_LE, mean_HE].
+    """
+
+    difference = absolute_difference(denoised, ground_truth)
+
+    # averages over the last two dimensions i.e. H and W of tensor of shape (C, H, W)
+    # and converts the resulting tensor to a Python list
+    return difference.mean(dim=(1, 2)).tolist()
+
+
+def projs_comparison(noisy_tensor, denoised, ground_truth, difference, mean_differences, filename, title): # pragma: no cover
     """
     Save a picture comparing the denoised projection with the ground truth.
 
@@ -79,62 +119,30 @@ def projs_comparison(noisy_tensor, denoised, ground_truth, filename, title): # p
         noisy_tensor: Tensor of shape (C, H, W).
         denoised: Tensor of shape (C, H, W).
         ground_truth: Tensor of shape (C, H, W).
+        difference: Tensor of shape (C, H, W), absolute difference between denoised and ground truth.
+        mean_differences: List with the mean of the absolute difference of each channel.
         filename: Output picture file.
         title: Title of the whole picture.
-
-    Returns:
-        List with the mean absolute difference of the 2 channel.
     """
-    difference = (denoised - ground_truth).abs()
-
-    # averages over the last two dimensions i.e. H and W of tensor of shape (C, H, W)
-    mean_differences_tensor = difference.mean(dim=(1, 2))
-
-    # converts that tensor to a Python list i.e. [mean_LE, mean_HE]
-    mean_differences = mean_differences_tensor.tolist()
 
     fig, axes = plt.subplots(2, 4, figsize=(18, 11), squeeze=False)
 
-    # --- Row 0: LE channel ---
-    im00 = axes[0, 0].imshow(noisy_tensor[0].numpy(), cmap='gray')
-    axes[0, 0].set_title("Noisy (LE)")
-    fig.colorbar(im00, ax=axes[0, 0], fraction=0.046, pad=0.04)
-
-    im00 = axes[0, 1].imshow(denoised[0].numpy(), cmap='gray')
-    axes[0, 1].set_title("Denoised (LE)")
-    fig.colorbar(im00, ax=axes[0, 1], fraction=0.046, pad=0.04)
-
-    im01 = axes[0, 2].imshow(ground_truth[0].numpy(), cmap='gray')
-    axes[0, 2].set_title("Ground truth (LE)")
-    fig.colorbar(im01, ax=axes[0, 2], fraction=0.046, pad=0.04)
-
-    im02 = axes[0, 3].imshow(difference[0].numpy(), cmap='gray')
-    axes[0, 3].set_title(f"Absolute difference (LE), mean = {mean_differences[0]:.6f}")
-    fig.colorbar(im02, ax=axes[0, 3], fraction=0.046, pad=0.04)
-
-    # --- Row 1: HE channel ---
-    im10 = axes[1, 0].imshow(noisy_tensor[1].numpy(), cmap='gray')
-    axes[1, 0].set_title("Noisy (HE)")
-    fig.colorbar(im10, ax=axes[1, 0], fraction=0.046, pad=0.04)
-
-    im11 = axes[1, 1].imshow(denoised[1].numpy(), cmap='gray')
-    axes[1, 1].set_title("Denoised (HE)")
-    fig.colorbar(im11, ax=axes[1, 1], fraction=0.046, pad=0.04)
-
-    im12 = axes[1, 2].imshow(ground_truth[1].numpy(), cmap='gray')
-    axes[1, 2].set_title("Ground truth (HE)")
-    fig.colorbar(im12, ax=axes[1, 2], fraction=0.046, pad=0.04)
-
-    im13 = axes[1, 3].imshow(difference[1].numpy(), cmap='gray')
-    axes[1, 3].set_title(f"Absolute difference (HE), mean = {mean_differences[1]:.6f}")
-    fig.colorbar(im13, ax=axes[1, 3], fraction=0.046, pad=0.04)
+    for row, channel_name in enumerate(CHANNEL_NAMES):
+        panels = [
+            (noisy_tensor, f"Noisy ({channel_name})"),
+            (denoised, f"Denoised ({channel_name})"),
+            (ground_truth, f"Ground truth ({channel_name})"),
+            (difference, f"Absolute difference ({channel_name}), mean = {mean_differences[row]:.6f}"),
+        ]
+        for column, (tensor, panel_title) in enumerate(panels):
+            image = axes[row, column].imshow(tensor[row].numpy(), cmap='gray')
+            axes[row, column].set_title(panel_title)
+            fig.colorbar(image, ax=axes[row, column], fraction=0.046, pad=0.04)
 
     fig.suptitle(title)
     fig.tight_layout()
     fig.savefig(filename, dpi=100, bbox_inches='tight')
     plt.close(fig)
-
-    return mean_differences
 
 
 def save_checkpoint(path, model, optimizer, scheduler, epoch, **extra):
