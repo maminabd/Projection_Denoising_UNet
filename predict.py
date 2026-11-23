@@ -1,16 +1,12 @@
 
 import argparse
-import glob
 import os
-from zipfile import Path
 import numpy as np
 import torch
 from libs.dataset import check_files, find_paired_files, load_as_tensor
 from libs.unet import UNet
-from libs.utils import get_device, projs_comparison
-
-IMAGE_SHAPE = (300, 300, 2)  # (H, W, C) for each single projection (C: channels, LE and HE projections)
-CHANNEL_NAMES = ('LE', 'HE')
+from libs.utils import (get_device, projs_comparison, absolute_difference,
+                        mean_absolute_difference)
 
 def parse_args():
     """Command-line arguments: path to noisy projections, trained denoiser model, and output for denoised projections."""
@@ -35,9 +31,6 @@ def main():
     noisy_files, groundtruth_files = find_paired_files(args.noisy, args.groundtruth)
     check_files(noisy_files, groundtruth_files)
 
-    # gather all noisy .npy files of the given directory and sort them to be processed
-    noisy_dataset = sorted(glob.glob(os.path.join(args.noisy,"*.npy")))
-    
     if not os.path.exists(args.model):
         raise FileNotFoundError(f"Model '{args.model}' not found")
 
@@ -83,8 +76,12 @@ def main():
         name = full_name_split[0] # just the main name without the extension, e.g. "proj_1" for name of comparison picture
         comparison_pic_name = os.path.join(args.output, f"{name}.png")
 
-        # create the comparison picture and return the mean absolute differences
-        mean_differences = projs_comparison(noisy_tensor, denoised, ground_truth, filename=comparison_pic_name, title=name)
+        # absolute difference maps and their means over the pixels of each channel, [mean_LE, mean_HE]
+        difference = absolute_difference(denoised, ground_truth)
+        mean_differences = mean_absolute_difference(denoised, ground_truth)
+
+        projs_comparison(noisy_tensor, denoised, ground_truth, difference, mean_differences,
+                         filename=comparison_pic_name, title=name)
 
         all_differences.append(mean_differences)
 
