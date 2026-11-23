@@ -1,10 +1,13 @@
-import math
 import pytest
 import torch
+import torch.nn.functional as F
 from libs.dataset import find_paired_files, load_as_tensor
-from libs.losses import denoising_loss, gradient_loss
-from libs.ssim import gaussian_window, ssim_loss
+from libs.losses import denoising_loss, gradient_loss, gaussian_window, SSIMLoss
 import os
+
+# SSIMLoss is a class, the tests below call an instance with the default settings
+# (window_size=5, sigma=1.5) like a function: ssim_loss(prediction, target).
+ssim_loss = SSIMLoss()
 
 # define the path to the projections_for_testing folder which contains 
 # input_testing and target_testing subfolders of mouse projections for testing purposes                                                                                                                                                                                                                                                                                                               
@@ -68,6 +71,25 @@ def test_denoising_loss_is_zero_for_identical_tensors():
     assert torch.isclose(total_loss, torch.tensor(0.0), atol=1e-7), \
             f"Expected ~0 for identical tensors, got {total_loss.item()}"
 
+def test_denoising_loss_uses_the_ssim_loss_class_with_a_3x3_window():
+    """
+    GIVEN: a noisy prediction and a target
+    WHEN: denoising_loss is computed with only the SSIM weight (mae and gradient weights are 0)
+    THEN: it equals the loss of SSIMLoss(window_size=3)
+    """
+    torch.manual_seed(42) # set a random seed for reproducibility
+    target = torch.rand(2, 2, 32, 32) # create a target and  a noisy prediction
+    pred = target + 0.1 * torch.randn(2, 2, 32, 32) # add Gaussian noise to the target to create a prediction
+
+    # compute the denoising loss with only the SSIM term and compare it to SSIMLoss(window_size=3)
+    combined = denoising_loss(pred, target, mae_weight=0, ssim_weight=1, gradient_weight=0)
+    # compute the SSIM loss with a 3x3 window
+    ssim_only = SSIMLoss(window_size=3)(pred, target)
+
+    assert torch.isclose(combined, ssim_only, atol=1e-7), (
+        f"denoising_loss with only the SSIM term should equal SSIMLoss(window_size=3), "
+        f"got {combined.item()} vs {ssim_only.item()}"
+    )
 
 def test_gradient_loss_ignores_a_constant_offset():
     """
@@ -322,6 +344,69 @@ def test_ssim_loss_detects_a_structural_difference():
 
     assert ssim_loss_value.item() > 0.99, f"Expected a large loss for different structures, got {ssim_loss_value.item()}"
 
+def test_ssim_loss_is_small_for_just_a_brightness():
+    """
+    GIVEN: a textured target, and a prediction which is the target plus a constant brightness of 0.1
+           (all the structure is kept, only the intensity level is shifted)
+    WHEN: SSIMLoss is computed
+    THEN: the loss is small (< 0.05) because the local structure of both is identical
+    """
+    torch.manual_seed(42)
+    target = torch.rand(4, 2, 300, 300)
+    shifted = target + 0.1 # add a constant brightness shift to the target
+
+    loss = ssim_loss(shifted, target)
+
+    assert loss.item() < 0.05, f"A constant shift keeps the structure, so the SSIM loss should be small, got {loss.item()}"
+
+def test_ssim_loss_is_more_structural_than_intensity_sensitive():
+    """
+    GIVEN: a target, and a predictions which is target + 0.1 (brightness shifted)
+    
+    Structure is kept, but value of each pixel is shifted by 0.1,
+             so MAE = 0.1 (an error that MAE considers significant)
+
+    WHEN: both MAE (L1) and SSIM loss are computed for each prediction
+
+    THEN: SSIM loss is LESS than MAE, MAE punishes a pure intensity offset, 
+          but SSIM sees the structure is intact.
+          
+    """
+    torch.manual_seed(42)
+    target = torch.rand(4, 2, 300, 300)
+    # create a brightness shifted version of the target by adding 0.1 to every pixel
+    shifted = target + 0.1
+
+    mae_shifted = F.l1_loss(shifted, target)
+    ssim_shifted = ssim_loss(shifted, target)
+
+    assert ssim_shifted < mae_shifted, (
+        f"Structure is kept: SSIM loss ({ssim_shifted.item():.4f}) should be less than MAE ({mae_shifted.item():.4f})"
+    )
+
+def test_ssim_loss_is_structural():
+    """
+    GIVEN: a target, and a predictions shuffled (the same pixel values at random positions).
+           The structure is changed.
+
+    WHEN: both MAE (L1) and SSIM loss are computed for each prediction
+
+    THEN: SSIM loss is MORE than MAE: MAE only compares pixel values 
+          but SSIM sees that the structure is lost.
+    """
+
+    torch.manual_seed(42)
+    target = torch.rand(4, 2, 300, 300)
+
+    # create a shuffled version of the target by flattening the spatial dimensions, shuffling, and reshaping back
+    shuffled = target.flatten(2)[:, :, torch.randperm(300 * 300)].view_as(target)
+
+    mae_shuffled = F.l1_loss(shuffled, target)
+    ssim_shuffled = ssim_loss(shuffled, target)
+
+    assert ssim_shuffled > mae_shuffled, (
+        f"Structure is lost: SSIM loss ({ssim_shuffled.item():.4f}) should be more than MAE ({mae_shuffled.item():.4f})"
+    )
 
 def test_ssim_loss_matches_handy_calculated_value():
     """
@@ -455,7 +540,9 @@ def test_ssim_loss_matches_handy_calculated_value():
                          [0., 1.]]).view(1, 1, 2, 2)
     target = 0.5 * pred
 
-    loss = ssim_loss(pred, target, window_size=3)
+    # "loss" is a called instance of the SSIMLoss class, 
+    # which computes the SSIM loss between the prediction and target images with a 3x3 Gaussian window (sigma = 1.5)
+    loss = SSIMLoss(window_size=3)(pred, target)
 
     expected_loss = 0.359148
     assert abs(loss.item() - expected_loss) < 1e-6, (
@@ -688,3 +775,98 @@ def test_ssim_loss_decreases_with_gradient_step(inp, tgt):
 
     assert loss2 < loss1, f"Expected loss to decrease after gradient step, \
                 but got loss2={loss2.item()} which is larger than loss1={loss1.item()}"
+
+def test_ssim_loss_class_stores_given_settings():
+    """
+    GIVEN: an SSIMLoss created with window_size=3 and sigma=1.0
+    WHEN: its window is read
+    THEN: the window is the Gaussian window with the same settings
+    """
+    # create an SSIMLoss object with specific window size and sigma
+    loss_fn = SSIMLoss(window_size=3, sigma=1.0)
+
+    assert torch.equal(loss_fn.window, gaussian_window(3, 1.0)), \
+        "The window of SSIMLoss should be gaussian_window(window_size, sigma)"
+
+def test_ssim_loss_class_has_no_trainable_parameters_and_no_state():
+    """
+    GIVEN: an SSIMLoss object
+    WHEN: its parameters and state dict are listed
+    THEN: both are empty, since the window is a constant and it must not be trained by an optimizer
+          and must not be saved in checkpoints
+    """
+    # create an SSIMLoss object
+    loss_fn = SSIMLoss()
+
+    assert list(loss_fn.parameters()) == [], "SSIMLoss should not have trainable parameters"
+    assert len(loss_fn.state_dict()) == 0, "The constant window should not be saved in the state dict"
+    assert len(list(loss_fn.buffers())) == 1, "The window should be registered as a buffer of the module"
+
+
+def test_ssim_loss_class_window_size_changes_the_loss():
+    """
+    GIVEN: two SSIMLoss objects with different window sizes
+    WHEN: they are applied to the same noisy prediction and target
+    THEN: the losses are different, so the window_size given to the class is really used
+    """
+    torch.manual_seed(42) # set a random seed for reproducibility
+    target = torch.rand(4, 2, 300, 300)  # create a target and a noisy prediction
+    pred = target + 0.1 * torch.randn(4, 2, 300, 300) # add Gaussian noise to the target to create a prediction
+    
+    # compute the SSIM loss with two different window sizes
+    loss_small_window = SSIMLoss(window_size=3)(pred, target)
+    loss_large_window = SSIMLoss(window_size=7)(pred, target)
+
+    assert not torch.isclose(loss_small_window, loss_large_window, atol=1e-4), (
+        f"Different window sizes should give different losses, got {loss_small_window.item()} "
+        f"and {loss_large_window.item()}"
+    )
+
+def test_ssim_loss_class_forward_is_the_same_as_call():
+    """
+    GIVEN: an SSIMLoss object
+    WHEN: SSIMLoss object is applied in 2 ways:
+            by calling the object 
+            by calling forward
+
+    THEN: both give the same loss
+    """
+    torch.manual_seed(42) # set a random seed for reproducibility
+    loss_fn = SSIMLoss() # create an SSIMLoss object
+
+    target = torch.rand(4, 2, 300, 300) # create a target and a noisy prediction
+    pred = target + 0.1 * torch.randn(4, 2, 300, 300) # add Gaussian noise to the target to create a prediction
+
+    assert torch.equal(loss_fn(pred, target), loss_fn.forward(pred, target)), \
+        "loss_fn(pred, target) and loss_fn.forward(pred, target) both ways should give the same loss"
+
+
+def test_ssim_loss_class_window_follows_the_dtype_of_the_module():
+    """
+    GIVEN: an SSIMLoss object converted to float64
+    WHEN: SSIMLoss object is created and its window is read
+    THEN: its window is float64 which means
+          the module follows the dtype of the module and not the default float32
+    """
+    torch.manual_seed(42) # set a random seed for reproducibility
+    loss_fn = SSIMLoss().to(torch.float64) # convert the module to float64
+
+    assert loss_fn.window.dtype == torch.float64, f"Expected float64 window, got {loss_fn.window.dtype}"
+
+def test_ssim_loss_class_follows_the_dtype_of_the_module():
+    """
+    GIVEN: an SSIMLoss object converted to float64
+    WHEN: SSIMLoss object is applied to float64 tensors
+    THEN: the loss is float64 which means
+          the module follows the dtype of the input tensors and not the default float32
+    """
+    torch.manual_seed(42) # set a random seed for reproducibility
+    loss_fn = SSIMLoss().to(torch.float64) # convert the module to float64
+
+    # create float64 tensors for prediction and target
+    pred = torch.rand(4, 2, 300, 300, dtype=torch.float64)
+    target = torch.rand(4, 2, 300, 300, dtype=torch.float64)
+
+    loss = loss_fn(pred, target) # compute the loss
+
+    assert loss.dtype == torch.float64, f"Expected float64 loss, got {loss.dtype}"
