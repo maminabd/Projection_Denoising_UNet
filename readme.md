@@ -1,78 +1,278 @@
-# Projection_Denoising_UNet
-This repository contains a 2D U-Net for denoising dual-energy X-ray projections (Low Energy and High Energy channels), written in PyTorch.
+## Projection_Denoising_UNet
+This repository contains a 2D UNet for denoising dual-energy X-ray projections (Low Energy and High Energy channels), written in PyTorch.
 
-## Overview
-The model is a 2D U-Net with residual blocks. It takes as input noisy projections with 2 channels (LE and HE) of size 300 x 300 and returns as output the denoised projection with the same shape.
-
-### Prepare Data
-The model expects two directories of `.npy` files: one with the noisy inputs and one with the clean targets. Each input file must correspound with a target file with the same name.
-
-Each file is a CBCT projection of a mouse with shape `(300, 300, 2)`. The last axis is the two channels: index 0 is LE (Low Energy projection) and index 1 is HE (High Energy projection). All projections are expected to already be normalized to the `[0, 1]` range.
-
-### Training
-Once the data is located, train the model with the training script. The input and target directories are required:
-
-```bash
-python training.py --input "path/to/input" --target "path/to/target"
-```
-
-You can also set the following training parameters:
-- Epochs (--epochs): default value 100
-- Batch size (--batch): default value 8
-- Save a checkpoint every N epochs (--save_every): default value 25
+- [Projection Denoising UNet](#projection_denoising_unet)
+  - [Overview](#overview)
+  - [Contents](#contents)
+  - [Installation & Setup](#installation--setup)
+  - [Testing](#testing)
+  - [Prepare Data](#prepare-data)
+  - [Training](#training)
+  - [Prediction](#prediction)
+  - [Prediction Results](#prediction-results)
+  - [References](#references)
 
 
-Run `python training.py --help` to see the full list. The remaining settings (learning rate, scheduler parameters and validation fraction) are constants at the top of [training.py](training.py).
+### Overview
+The projections in this project come from Cone-Beam Computed Tomography (CBCT) with an X-ray energy of 65 keV. They are acquired with a photon-counting detector, which sorts the detected photons into a Low Energy (LE) bin and a High Energy (HE) bin. The energy division is made at the average energy of the spectrum: photons below it are counted in the LE bin and photons above it in the HE bin.
 
-## Contents
-Projection Denoising U-Net is composed of scripts and modules:
-- Script trains the model
-- Modules define the dataset, the model, and the helper functions in PyTorch.
+Because X-ray photons are detected one by one, the projections are affected by Poisson noise. The aim of this project is to remove this noise with a deep learning approach. For this image-to-image translation (noisy to noiseless) task, the UNet [1] is a good candidate model.
 
-**Script:** 
+The model used in this project is a 2D UNet with residual blocks [2], where each block has 3 convolution layers. It takes as input noisy projections with 2 channels (LE and HE) of size 300 x 300 and returns as output the denoised projection with the same shape.
 
-| **Scripts** | **Description** |
+This project has two modes: training and prediction.
+
+- **Training mode:** after downloading the dataset (see [Prepare Data](#prepare-data)), you can train the model with it. Alternatively, you can skip training and use the pre-trained model [UNet_best.pth](./).
+- **Prediction mode:** the model predicts the denoised projections corresponding to the given noisy projections. The folder [prediction_dataset](./prediction_dataset) contains 12 pairs of noisy/noiseless projections that are used to evaluate the performance of the trained UNet. These 12 pairs are projections of 3 different mice that were not part of the training dataset, so they are completely new for the model.
+
+---
+### Contents
+Projection Denoising UNet is composed of scripts and modules:
+
+- Scripts train the model and make predictions with it.
+- Modules define the dataset, the model, the losses and the helper functions in PyTorch.
+
+**Script:**
+
+All scripts are located in the [main directory](./)
+
+| Scripts | Description |
 |:----------:|:----------------|
-| [training](./training.py) | Trains the model with the given input and target projections, epochs and batch size, learning rate regime and some other hyperparameters.<br>• Saves the best model based on improvement of validation loss<br>• Makes a log file of loss values during training<br>• Saves a plot of the loss history and learning rate per epoch |
+| [training](./training.py) | Trains the model with the downloaded input and target projections, and the given number of epochs, batch size, learning rate regime and some other hyperparameters.<br>• Saves the best model based on improvement of validation loss<br>• Makes a log file of loss values during training<br>• Saves a plot of the loss history and learning rate per epoch |
+| [predict](./predict.py) | Denoises noisy projections with a trained model and compares them with the ground truth.<br>• Saves the denoised projections as `.npy` files<br>• Saves a comparison picture for each projection<br>• Prints the mean absolute difference between the denoised and the ground truth projections for the LE and HE channels |
 
 **Modules:**
+
+All modules are located in the [libraries folder](./libs)
 
 | **Module** | **Description** |
 |:----------|:---------------|
 | [dataset](libs/dataset.py) | Checks the data files and loads input/target projection pairs, train/validation split, create a batch of projections|
-| [unet](libs/unet.py) | The model: residual block and the 2D U-Net built from them |
-| [utils](libs/utils.py) | Helper functions: device setup, save/load checkpoints and history plots |
+| [unet](libs/unet.py) | The model: the residual block (ResBlock) and the 2D UNet built from it. The UNet consists of an encoder, a bottleneck and a decoder. The encoder has 4 levels (32, 64, 128 and 256 channels); at each level a residual block extracts features and max pooling halves the spatial size, so the encoder captures the content of the projection at several scales. The bottleneck (512 channels) is the deepest level of the network. The decoder mirrors the encoder: transposed convolutions double the spatial size step by step, and skip connections concatenate the encoder features of the same level, which gives back the fine details lost by poolings of encoder. The residual connection inside each block adds the input of the block to its output, which makes the training of the deep network easier and more stable. Dropout layers are used in the deeper levels to reduce overfitting. A final convolution maps the features to the 2 output channels (denoised LE and HE). |
+| [utils](libs/utils.py) | Helper functions: device setup (use cuda or cpu), save/load checkpoints, plot histories, plot comparisons of projections  |
+| [losses](libs/losses.py) | Contains all the loss functions and the combined denoising loss that gathers all 3 loss components together:<br>• `SSIMLoss`: a class of the SSIM loss [3], 1 - SSIM, which captures structural differences between the predicted and target projections. It uses a Gaussian window (built by the `gaussian_window` function) with the given `window_size` and `sigma`, e.g. `SSIMLoss(window_size=3)(prediction, target)`<br>• `gradient_loss`: edge-preserving loss, the MSE between the gradients of the predicted and target projections<br>• `denoising_loss`: the weighted sum of the MAE, the SSIM loss (3x3 window) and the gradient loss |
+| [data augmentation](libs/data_augmentation.py) | Contains the geometrical transformations (rotating and flipping functions) used for data augmentation. Data augmentation is applied only in the training process (not in validation) to expand the training dataset and reduce the risk of overfitting. The transformations create variations of the projections, so the model cannot just learn a few common patterns of the training dataset to reduce the loss, and it becomes more robust. |
 
+Here is the directory structure of the repository:
 
+- [training dataset]
+  - [input]
+  - [target]
+
+- [prediction_dataset](./prediction_dataset)
+  - [noisy projection](./prediction_dataset/noisy_projs)
+  - [ground truth](./prediction_dataset/groundtruth)
+
+- [tests](./tests)
+  - [projections for testing](./tests/projections_for_testing)
+  - [test_dataset.py](tests/test_dataset.py)
+  - [test_losses.py](tests/test_losses.py)
+  - [test_utils.py](tests/test_utils.py)
+  - [test_data_aug.py](tests/test_data_aug.py)
+  - [test_unet.py](tests/test_unet.py)
+
+- [libraries](./libs)
+  - [dataset.py](./libs/dataset.py)
+  - [losses.py](./libs/losses.py)
+  - [UNet.py](./libs/unet.py)
+  - [utils.py](./libs/utils.py)
+  - [data_augmentation.py](./libs/data_augmentation.py)
+
+- [training.py](./training.py)
+- [prediction.py](./prediction.py)
+
+---
 ### Installation & Setup
-
-To install the software, clone this repository:
+In order to use this project, go to the directory where you want to build the project and clone this repository there:
 
 ```bash
 git clone https://github.com/maminabd/Projection_Denoising_UNet.git
 ```
 
-To be able to make the model run is mandatory to install the requirements via [requirements.txt](https://github.com/maminabd/Projection_Denoising_UNet/blob/main/requirements.txt).
-We recommend installing libraries in a Conda environment. After activating the environment, run:
+Next, create a virtual environment dedicated for the project:
+
+```bash
+python -m venv denoising_env
+```
+
+Activate the newly created environment:
+
+**On Windows:**
+```bash
+denoising_env\Scripts\activate
+```
+
+**On Linux and macOS:**
+```bash
+source denoising_env/bin/activate
+```
+Finally, go to the project directory:
 
 ```bash
 cd Projection_Denoising_UNet
-conda install --file requirements.txt
 ```
 
-### Testing
-The group of tests are in the [tests](./tests/) directory including (`test_dataset.py`, `test_unet.py`). They are written with [pytest](https://docs.pytest.org/), which already installed via requirements.txt, and do not require a GPU or the real dataset, the files they need are generated in a temporary directory.
+Install the required dependencies of this project listed in [requirements.txt](https://github.com/maminabd/Projection_Denoising_UNet/blob/main/requirements.txt) by using this command:
 
-To run the whole group of tests, from the repository root:
+```bash
+pip install -r requirements.txt
+```
+
+Once all the dependencies have been installed, the environment is ready to be used for this project.
+
+---
+### Testing
+The tests are in the [tests](./tests/) directory. Each file tests the module with the corresponding name in [libs](./libs). They are written with [pytest](https://docs.pytest.org/), which is already installed via requirements.txt, and do not require a GPU. Most of the tests generate the files they need in a temporary directory, and some of them need real projections, for which they use the mouse projections in the [projections_for_testing](./tests/projections_for_testing) folder.
+
+To run the whole group of tests from the main repository root you need to execute:
 
 ```bash
 cd Projection_Denoising_UNet
 pytest ./tests/
 ```
 
-To run a single test file or a single test:
+To run a single test file or a single test you need to execute:
 
 ```bash
 pytest tests/test_dataset.py
 pytest tests/test_dataset.py::test_split_files_sizes
 ```
+
+#### Running Tests with Coverage
+Coverage is tracked with `coverage.py` and configured in [.coveragerc](./.coveragerc). Only the `libs/` package is measured; the command-line scripts (`training.py`, `predict.py`) and the tests themselves are omitted. 
+
+To run the whole tests with the coverage from the main repository root you need to execute:
+
+```bash
+bash run_tests_coverage.sh
+```
+
+This is equivalent to:
+
+```bash
+coverage erase
+coverage run --rcfile=.coveragerc -m pytest tests/
+coverage report -m
+coverage html
+```
+
+The terminal report lists the missing lines of each file, and the HTML report is saved in the `htmlcov` folder, which contains three main pages:
+
+- The [index.html](htmlcov/index.html) file contains a summary of the coverage statistics, including the percentage of each file covered by tests. You can click on each file to see a detailed view of the code, with lines highlighted to indicate which lines were executed during testing and which were not. 
+
+- The [class_index.html](htmlcov/class_index.html) file provides a class-level view of the coverage report, showing which classes were covered by tests and which were not.
+
+- The [function_index.html](htmlcov/function_index.html) file provides a function-level view of the coverage report, showing which functions were covered by tests and which were not.
+
+The command-line scripts (`training.py` and `predict.py`) and the functions that only display or save pictures or select the device (`get_device`, `plot_history` and `projs_comparison` in [utils](libs/utils.py)) are intentionally excluded from the coverage measurement. 
+
+For this project, the tests cover 100% of codes in `libs/`.
+
+---
+### Prepare Data
+The model expects one dataset directory containing 2 subfolders, "input" and "target", each containing mouse projection `.npy` files at different angles. Each `.npy` file in the "input" folder must correspond to a file in the "target" folder with the same name.
+
+The dataset containing 5400 pairs of projections of 15 different mice can be downloaded from this [link](https://liveunibo-my.sharepoint.com/:u:/g/personal/mohammadamin_abdoli_studio_unibo_it/IQCQOj_Bmr09QbBFEW7XAaVLAULFPKUab1RU6rxNfJKIRQs?e=pSozAf). When the download is finished, a `.tar.xz` file called "training_dataset" with size 2.7 GB is created in the download directory. Navigate to that directory:
+
+```bash
+cd path/to/download/directory
+```
+
+Then decompress the file with the following command (note that the decompressed training_dataset folder needs 7.2 GB of disk space):
+
+```bash
+tar -xvf training_dataset.tar.xz
+```
+
+Each `.npy` file is a CBCT projection of a mouse in frontal (coronal) plane, with shape `(300, 300, 2)`. The last axis is the two channels: index 0 is LE (Low Energy projection) and index 1 is HE (High Energy projection). All projections are expected to already be normalized to the `[0, 1]` range.
+
+---
+### Training
+When the dataset is ready, we can train the model with the training script. The path to the training_dataset directory is required for training.
+
+```bash
+python training.py --dataset "path/to/training_dataset" 
+```
+
+You can also set the following training hyperparameters or options:
+
+- Epochs (--epochs): default value 100
+
+- Batch size (--batch): default value 8
+
+- Save a checkpoint every N epochs (--save_model_every): default value 25
+
+- Plot training history every N epochs (--plot_every): default value 5
+
+- Path to checkpoint (.pth) to continue training from (--resume)
+
+- Check if the dataset is valid for training (--check_dataset). If you omit this option, the code skips the checking the dataset (default), and you if add --check_dataset with any variable e.g. --check_dataset 1, it runs the check_dataset which may take some time. If check_dataset confirms the dataset for the first training, --check_dataset can be omitted for subsequent trainings.
+
+Here are some examples for training:
+
+For the first training:
+
+```bash
+python training.py --dataset "path/to/training_dataset" --check_dataset 1
+```
+
+To continue training from a checkpointed model:
+
+```bash
+python training.py --dataset "path/to/training_dataset" --epochs 200 --resume UNet_epoch_025.pth
+```
+
+To monitor save the results of training more frequently, you can set lower values for plot_every and save_model_every.
+
+
+```bash
+python training.py --dataset "path/to/training_dataset" --plot_every 5 --save_model_every 10
+```
+
+Run `python training.py --help` to see the full list. The remaining settings (learning rate, scheduler parameters and validation fraction) are constants at the top of [training.py](training.py).
+
+---
+### Prediction
+Once a UNet model with high accuracy is trained, we can use it to denoise unseen mouse projections with the same Poisson noise that the training dataset projections have. To do so, run the prediction script, which requires the path to the folder of noisy projections, the path to the folder of the corresponding noiseless ground truth for the evaluation and the path to the model file (.pth). The following command denoises the projection samples provided in [prediction_dataset](./prediction_dataset) using the fine-tuned [UNet model](./UNet_best.pth).
+
+```bash
+python predict.py --noisy ./prediction_dataset/noisy_projs --groundtruth ./prediction_dataset/groundtruth --model ./UNet_best.pth
+```
+
+The [predict.py](./predict.py) saves the denoised projections in  and also compares the denoised projections with the noiseless ones and saves the comparison results as a picture. For this, you can also set the directory where denoised `.npy` files and the comaprison pictures are saved by using `--output`  (default: `--output ./predicted_results`).
+
+---
+#### Prediction Results
+
+The 12 pairs of projections in [prediction_dataset](./prediction_dataset) were denoised with the trained model. The mean absolute difference between the denoised and the ground truth projections, averaged over the 12 evaluation files, is: 
+
+
+| **Channel** | **Mean absolute difference** |
+|:-----------:|:----------------------------:|
+| LE (Low Energy) | 0.001977 |
+| HE (High Energy) | 0.001571 |
+
+The projections are normalized to the `[0, 1]` range, so these values are very small compared to the intensity range.
+
+---
+#### Example Output
+
+Below is a sample output of [predict.py](./predict.py). It shows the denoised projection of a mouse (second column) for both the low energy (top) and high energy (bottom) channels, along with the given noisy projection (first column), the ground truth projection which is noiseless (third column) and the absolute difference map (fourth column).
+
+<p align="center">
+  <img src="./sample_comparison.png" alt="Denoised Mouse Projection Example" width="100%"/>
+</p>
+
+---
+
+
+### References
+<blockquote>[1] - Olaf Ronneberger, Philipp Fischer, and Thomas Brox. UNet: Convolutional Networks for Biomedical Image Segmentation. 2015. doi: 10.1007/978-3-319-24574-4_28.
+</blockquote>
+
+<blockquote>[2] - Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Sun Jian. Deep residual learning for image recognition. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition, pages 770–778, 2016.
+</blockquote>
+
+
+<blockquote>[3] - Zhou Wang, Alan C. Bovik, Hamid R. Sheikh, and Eero P. Simoncelli. Image Quality Assessment: From Error Visibility to Structural Similarity. IEEE Transactions on Image Processing, 13(4):600–612, 2004. doi: 10.1109/TIP.2003.819861.
+</blockquote>
