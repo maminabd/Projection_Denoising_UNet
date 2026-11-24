@@ -1,5 +1,6 @@
 
 import glob
+import logging
 import os
 import numpy as np
 from sklearn.model_selection import train_test_split
@@ -7,17 +8,61 @@ import torch
 import random
 from libs.data_augmentation import rotation_augmentation, flipping_augmentation
 
+logger = logging.getLogger(__name__)
+
 IMAGE_SHAPE = (300, 300, 2)  # (H, W, C) for each single projection
+ROTATION_KS = [1, 2, 3]  # numbers of 90 degrees rotations that the rotation augmentation can choose from
+
+# it is a private function not to be used outside this module.
+def _check_intensity_range(paths, kind):
+    """
+    Check that the intensity values of every .npy file in paths are inside [0, 1].
+
+    Args:
+        paths: List of .npy file paths.
+        kind: Name of the kind of files ("input" or "target"), used in the error message.
+
+    Raises:
+        ValueError: if a file has intensity values outside the range [0, 1].
+    """
+
+    for path in paths:
+        array = np.load(path)
+        if array.min() < 0 or array.max() > 1:
+            raise ValueError(
+                f"{path}: intensity values of {kind} files should be in [0, 1], "
+                f"got range [{array.min()}, {array.max()}]"
+            )
+
+# it is a private function not to be used outside this module.
+def _check_shape(paths, image_shape):
+    """
+    Check that every .npy file in paths has the expected shape.
+
+    Args:
+        paths: List of .npy file paths.
+        image_shape: Expected shape (H, W, C) of every projection.
+
+    Raises:
+        ValueError: if a file does not have the expected shape.
+    """
+
+    for path in paths:
+        array_shape = np.load(path).shape
+        if array_shape != tuple(image_shape):
+            raise ValueError(f"{path}: expected shape {tuple(image_shape)}, got {array_shape}")
 
 
 def check_files(input_files, target_files, image_shape=IMAGE_SHAPE):
 
     """
-    Check two things:
+    Check three things:
 
     1st: If the input data and output data have the same length (number of projections)
 
-    2nd: If every input/target file has the expected shape.
+    2nd: If the intensity values of every input/target file are in the range [0, 1].
+
+    3rd: If every input/target file has the expected shape.
 
 
     Args:
@@ -35,33 +80,11 @@ def check_files(input_files, target_files, image_shape=IMAGE_SHAPE):
     if len(input_files) != len(target_files):
         raise ValueError("Number of input and target files differ!")
 
-    for path in list(input_files):
-            inp = np.load(path)
-            if inp.min() < 0 or inp.max() > 1:
-                raise ValueError(
-                    f"{path}: intensity values of input files should be in [0, 1], "
-                    f"got range [{inp.min()}, {inp.max()}]"
-                )
-  
-    for path in list(target_files):
-                tgt = np.load(path)
-                if tgt.min() < 0 or tgt.max() > 1:
-                    raise ValueError(
-                        f"{path}: intensity values of target files should be in [0, 1], "
-                        f"got range [{tgt.min()}, {tgt.max()}]"
-                    )
+    _check_intensity_range(input_files, "input")
+    _check_intensity_range(target_files, "target")
 
-    for path in list(input_files):
-        loaded_array = np.load(path)
-        array_shape = loaded_array.shape
-        if array_shape != tuple(image_shape):
-            raise ValueError(f"{path}: expected shape {tuple(image_shape)}, got {array_shape}")
-
-    for path in list(target_files):
-        loaded_array = np.load(path)
-        array_shape = loaded_array.shape
-        if array_shape != tuple(image_shape):
-            raise ValueError(f"{path}: expected shape {tuple(image_shape)}, got {array_shape}")
+    _check_shape(input_files, image_shape)
+    _check_shape(target_files, image_shape)
 
 
 def find_paired_files(input_dir, target_dir, pattern="*.npy"):
@@ -83,8 +106,8 @@ def find_paired_files(input_dir, target_dir, pattern="*.npy"):
     input_files = sorted(glob.glob(os.path.join(input_dir, pattern)))
     target_files = sorted(glob.glob(os.path.join(target_dir, pattern)))
 
-    print(f"\nFound {len(input_files)} input files")
-    print(f"Found {len(target_files)} target files")
+    logger.info("Found %d input files", len(input_files))
+    logger.info("Found %d target files", len(target_files))
 
     if len(input_files) == 0:
         raise FileNotFoundError(f"No files matching '{pattern}' found in {input_dir}")
@@ -194,8 +217,7 @@ def collate_augmented_batch(path_pairs, use_augmentation=False, rotation_probabi
 
     augmented_inputs = []
     augmented_targets = []
-    ROTATION_KS = [1, 2, 3]
-    
+
     for input_tensor, target_tensor in zip(inputs, targets):
 
         flip_type = random.randint(0, 2)  # 0: horizontal, 1: vertical, 2: both
@@ -213,7 +235,7 @@ def collate_augmented_batch(path_pairs, use_augmentation=False, rotation_probabi
         augmented_inputs.append(input_tensor)
         augmented_targets.append(target_tensor)
 
-        inputs = torch.stack(augmented_inputs)
-        targets = torch.stack(augmented_targets)
+    inputs = torch.stack(augmented_inputs)
+    targets = torch.stack(augmented_targets)
 
     return inputs, targets
