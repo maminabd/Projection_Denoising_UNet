@@ -2,6 +2,7 @@
 import torch
 from libs.unet import ResBlock, UNet
 import torch.nn.functional as F
+import math
 
 def test_ResBlock_output_size():
     """
@@ -515,8 +516,85 @@ def test_match_size_matches_handy_calculated_bilinear_interpolation():
     f"expected {handy_calculated}, got {matched_size}"
     )
 
+def test_unet_eval_output_does_not_depend_on_rest_of_batch():
+    """
+    GIVEN: a UNet in eval mode and a batch of 4 different projections
+    WHEN: the first projection is denoised in 2 ways: alone and together with the other 3 projections
+    THEN: the results are the same, 
+          because eval-mode BatchNorm uses fixed statistics instead of statistics of the batch
+    """
+    torch.manual_seed(42) # for reproducibility across runs
+    model = UNet().eval() # switch to evaluation mode (do inference) and no training mode
+    batch = torch.rand(4, 2, 300, 300) # a batch of 4 different projections
 
-                            
-                        
-    
-            
+    with torch.no_grad(): # here we only do inference, so no gradients needed
+
+        alone = model(batch[:1]) # denoise the first projection alone, 
+        # meaning BatchNorm layer uses only the statistics of the first projection
+        
+        together = model(batch)[:1] # denoise the first projection inside the batch, 
+        # meaning the BatchNorm layers uses the statistics of the whole batch instead of the fixed statistics
+
+    assert torch.allclose(alone, together, atol=1e-6), (
+        f"The output should not depend on the other samples, "
+        f"but the result of single projection is {alone} is different from "
+        f"the result of the same projection in a batch {together}"
+    )
+
+def test_unet_can_learn():
+    """
+    GIVEN: a UNet and one noisy/clean pair
+    WHEN: a few optimizer steps on the L1 loss are taken
+    THEN: the loss goes down, which shows gradients flow through the whole architecture
+          and the weights update in a useful direction
+    """
+    torch.manual_seed(42) # for reproducibility across runs
+
+    clean = torch.rand(2, 2, 32, 32) * 0.5 + 0.5 # create a random clean image with values in [0.5, 1.0]
+
+    # create a noisy version of the clean image by adding Gaussian noise and clamping values to [0, 1]
+    noisy = (clean + 0.1 * torch.randn_like(clean)).clamp(0, 1)
+
+    model = UNet().train() # switch to training mode (for dropout, batchnorm, etc.)
+
+    # create an AdamW optimizer for the model's parameters with a constant learning rate of 1e-3
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+
+    losses = []
+    for _ in range(10): # perform 20 optimization steps
+        optimizer.zero_grad() # reset gradients to zero before backpropagation
+
+        # compute the L1 loss between the model's output and the clean image
+        loss = torch.nn.functional.l1_loss(model(noisy), clean) 
+
+        loss.backward() # compute gradients by backpropagating the loss
+
+        optimizer.step() # update the model's parameters based on the computed gradients
+
+        losses.append(loss.item()) # record the loss value for this step
+
+    # Check that the loss of the last step is decreased by at least 25% compared to the first step,
+    # indicating that the model is learning
+    assert losses[-1] < losses[0] * 0.75, \
+        f"The loss should drop clearly over 10 steps, got {losses[0]} -> {losses[-1]}"                       
+
+
+def test_unet_state_dict_roundtrip_reproduces_the_output(tmp_path):
+    """
+    GIVEN: a UNet whose weights were saved
+    WHEN: they are loaded into a UNet that is initialized differently
+    THEN: both models give the same output in eval mode (this is what happens in predict.py)
+    """
+    torch.manual_seed(1) # for reproducibility across runs
+    model = UNet().eval() # switch to evaluation mode (do inference) and no training mode
+    path = tmp_path / "unet.pth" # path to save the model's state_dict
+    torch.save(model.state_dict(), path) # save the model's state_dict to the specified path
+
+    torch.manual_seed(2) # change the seed to initialize a different model
+    restored = UNet().eval() # switch to evaluation mode (do inference) and no training mode
+    restored.load_state_dict(torch.load(path, weights_only=True)) # load the saved state_dict into the new restored model
+    x = torch.rand(1, 2, 48, 48) # a random input to test the output of both models
+
+    # Compare the outputs of the original and new restored models to ensure they are identical
+    with torch.no_grad(): # disable gradient calculation for inference
+        assert torch.equal(model(x), restored(x)), "A restored model should reproduce the saved one"
