@@ -1,5 +1,6 @@
-numpy
-torch
-scikit-learn
-matplotlib
-pytest
+numpy>=2.4
+torch>=2.7
+scikit-learn>=1.8
+matplotlib>=3.11
+pytest>=9.1
+coverage>=7.14
