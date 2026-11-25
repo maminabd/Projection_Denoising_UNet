@@ -177,7 +177,8 @@ def load_checkpoint(path, model, optimizer, scheduler, device):
     Returns:
         Tuple of (checkpointed_epoch, checkpointed_val_loss): respectively are:
             -the epoch to resume from after loading the checkpoint.
-            -the validation loss stored in the checkpoint which act as a reference for the best validation loss so far.
+            -the validation loss stored in the checkpoint (None if the checkpoint has no 'val_loss' entry),
+             which acts as a reference for the best validation loss so far.
     """
 
     # loads a checkpoint (weights_only=True: the checkpoint only holds tensors and numbers)
@@ -188,7 +189,7 @@ def load_checkpoint(path, model, optimizer, scheduler, device):
     optimizer_param = checkpoint['optimizer_state_dict']
     scheduler_param = checkpoint['scheduler_state_dict']
     checkpointed_epoch = checkpoint['checkpointed_epoch'] + 1 # resume from the next epoch after the checkpointed one
-    checkpointed_val_loss = checkpoint.get('val_loss') # .get() is used because 'val_loss' is stored by **extra.
+    checkpointed_val_loss = checkpoint.get('val_loss') # .get() is used because 'val_loss' is an optional entry, stored by **extra of save_checkpoint.
 
     # load those parameters into their corresponding objects.
     model.load_state_dict(model_param)
