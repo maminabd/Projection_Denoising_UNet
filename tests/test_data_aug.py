@@ -19,8 +19,6 @@ ALL_PROJECTION_PAIRS = [
     (load_as_tensor(inp), load_as_tensor(tgt))
     for inp, tgt in zip(input_files, target_files)]
 
-ALL_PATH_PAIRS = list(zip(input_files, target_files))
-
 # define the rotation angles parameter for the tests
 ROTATION_KS = [1, 2, 3] # Rotation angles: k=1: 90° , k=2: 180° , k=3: 270°
 
@@ -135,7 +133,7 @@ def test_rotation_function_keeps_mean_intensity_of_original_ones(inp, tgt, k):
 
 @pytest.mark.parametrize("k", ROTATION_KS)
 @pytest.mark.parametrize("inp, tgt", ALL_PROJECTION_PAIRS)
-def test_input_and_target_get_the_same_transformation(inp, tgt, k):
+def test_data_aug_input_and_target_get_the_same_transformation(inp, tgt, k):
     """
     GIVEN: the same projections are used as input and as target
     WHEN: the rotation_augmentation is applied
