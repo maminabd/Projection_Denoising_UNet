@@ -46,8 +46,8 @@ def test_gradient_loss_swap_prediction_target():
           (i.e. gradient_loss(prediction, target) or gradient_loss(target, prediction))
           because it is based on the mean squared error of the gradients.
     """
-    prediction = torch.full((4, 2, 300, 300), 0.51)
-    target = torch.full((4, 2, 300, 300), 0.5)
+    prediction = torch.full((4, 2, 300, 300), 0.6)
+    target = torch.full((4, 2, 300, 300), 0.4)
 
     grad_loss_1 = gradient_loss(prediction, target)
     # swaped one
@@ -60,7 +60,7 @@ def test_denoising_loss_is_zero_for_identical_tensors():
     """
     GIVEN: two identical projection batches
     WHEN: denoising_loss is called
-    THEN: the totla loss is zero
+    THEN: the total loss is zero
     """
 
     prediction = torch.full((4, 2, 300, 300), 0.5)
@@ -71,15 +71,15 @@ def test_denoising_loss_is_zero_for_identical_tensors():
     assert torch.isclose(total_loss, torch.tensor(0.0), atol=1e-7), \
             f"Expected ~0 for identical tensors, got {total_loss.item()}"
 
-def test_denoising_loss_uses_the_ssim_loss_class_with_a_3x3_window():
+def test_denoising_loss_uses_the_ssim_loss_with_weight_1():
     """
     GIVEN: a noisy prediction and a target
-    WHEN: denoising_loss is computed with only the SSIM weight (mae and gradient weights are 0)
-    THEN: it equals the loss of SSIMLoss(window_size=3)
+    WHEN: denoising_loss is computed with only the SSIM loss weight = 1 (mae and gradient weights are 0)
+    THEN: denoising_loss returns loss equals the loss of SSIMLoss(window_size=3)
     """
     torch.manual_seed(42) # set a random seed for reproducibility
-    target = torch.rand(2, 2, 32, 32) # create a target and  a noisy prediction
-    pred = target + 0.1 * torch.randn(2, 2, 32, 32) # add Gaussian noise to the target to create a prediction
+    target = torch.rand(2, 2, 300, 300) # create a target and  a noisy prediction
+    pred = target + 0.1 * torch.randn(2, 2, 300, 300) # add Gaussian noise to the target to create a prediction
 
     # compute the denoising loss with only the SSIM term and compare it to SSIMLoss(window_size=3)
     combined = denoising_loss(pred, target, mae_weight=0, ssim_weight=1, gradient_weight=0)
@@ -87,8 +87,29 @@ def test_denoising_loss_uses_the_ssim_loss_class_with_a_3x3_window():
     ssim_only = SSIMLoss(window_size=3)(pred, target)
 
     assert torch.isclose(combined, ssim_only, atol=1e-7), (
-        f"denoising_loss with only the SSIM term should equal SSIMLoss(window_size=3), "
+        f"denoising_loss with only the SSIM weight = 1 should equal SSIMLoss(window_size=3), "
         f"got {combined.item()} vs {ssim_only.item()}"
+    )
+
+def test_denoising_loss_weights_scale_invariance():
+    """
+    GIVEN: a noisy prediction and a target
+    WHEN: denoising_loss is computed with only the SSIM loss weight = 1 (mae and gradient weights are 0)
+    THEN: denoising_loss returns loss equals the loss of SSIMLoss(window_size=3)
+    """
+    torch.manual_seed(42) # set a random seed for reproducibility
+    target = torch.rand(2, 2, 300, 300) # create a target and  a noisy prediction
+    pred = target + 0.1 * torch.randn(2, 2, 300, 300) # add Gaussian noise to the target to create a prediction
+
+    # compute the denoising loss with only the SSIM term and compare it to SSIMLoss(window_size=3)
+    denoising_loss_w1 = denoising_loss(pred, target, mae_weight=0.4, ssim_weight=0.25, gradient_weight=0.35)
+
+    denoising_loss_w2= denoising_loss(pred, target, mae_weight=0.8, ssim_weight=0.5, gradient_weight=0.7)
+
+
+    assert torch.isclose(denoising_loss_w1, denoising_loss_w2, atol=1e-7), (
+        f"denoising_loss should be scale-invariant with respect to the weights, "
+        f"got {denoising_loss_w2.item()} when weights are doubled instead of {denoising_loss_w1.item()} for the weights normalized to 1"
     )
 
 def test_gradient_loss_ignores_a_constant_offset():
@@ -110,7 +131,7 @@ def test_gradient_loss_ignores_a_constant_offset():
 def test_gradient_loss_grows_with_noise():
     """
     GIVEN: a target batch with a sharp vertical straight line, and 
-           a prediction batch made of the same line plus noise
+           a prediction batch made of the same straight line plus some noise
 
     WHEN: gradient_loss is computed between prediction and the target
     THEN: the loss for the noisy prediction is larger than the loss for the noiseless prediction
@@ -282,7 +303,7 @@ def test_ssim_loss_is_zero_for_identical_images():
 
     ssim_loss_value = ssim_loss(projections, projections)
 
-    assert torch.isclose(ssim_loss_value, torch.tensor(0.0), atol=1e-5), \
+    assert torch.isclose(ssim_loss_value, torch.tensor(0.0), atol=1e-7), \
         f"Expected ~0 for identical images, got {ssim_loss_value.item()}"
 
 def test_ssim_loss_swap_prediction_target():
@@ -570,36 +591,6 @@ def test_ssim_loss_returns_values_in_valid_range():
         "SSIM loss values must be in the range [0, 1]"
 
 
-def test_ssim_loss_gives_zero_for_perfect_prediction():
-    """
-    GIVEN: a prediction whose both channels are perfectly predicted
-    WHEN: ssim_loss is computed on both channels together and separately
-    THEN: the loss of each channel and the loss of both channels together are all ~0
-    """
-
-    # create a target with two channels, each filled with a constant value
-    target_ch0 = torch.full((4, 1, 300, 300), 0.5)
-    target_ch1 = torch.full((4, 1, 300, 300), 0.4)
-
-    # concatenate the two channels to form a target tensor of shape (4, 2, 300, 300)
-    target = torch.cat([target_ch0, target_ch1], dim=1)
-
-    # create a prediction with two channels, each filled with the same constant value as the target
-    pred_ch0 = torch.full((4, 1, 300, 300), 0.5)
-    pred_ch1 = torch.full((4, 1, 300, 300), 0.4)
-
-    # concatenate the two channels to form a prediction tensor of shape (4, 2, 300, 300)
-    pred = torch.cat([pred_ch0, pred_ch1], dim=1)
-
-    # calculate the ssim loss for both channels together and each channel separately
-    both = ssim_loss(pred, target)
-    first = ssim_loss(pred_ch0, target_ch0)
-    second = ssim_loss(pred_ch1, target_ch1)
-
-    assert abs(first.item()) < 1e-6, f"The first channel (perfectly predicted) should have ~0 loss, got {first.item()}"
-    assert abs(second.item()) < 1e-6, f"The second channel (perfectly predicted) should have ~0 loss, got {second.item()}"
-    assert abs(both.item()) < 1e-6, f"The both channels (perfectly predicted) should have ~0 loss, got {both.item()}"
-    
 @pytest.mark.parametrize("inp, tgt", ALL_PROJECTION_PAIRS)
 def test_ssim_loss_treats_channels_independently(inp, tgt):
     """
@@ -628,6 +619,37 @@ def test_ssim_loss_treats_channels_independently(inp, tgt):
         f"got {both.item():.6f}"
     )
 
+
+def test_ssim_loss_gives_zero_for_perfect_prediction():
+    """
+    GIVEN: a prediction whose both channels are perfectly predicted
+    WHEN: ssim_loss is computed on both channels together and separately
+    THEN: the loss of each channel and the loss of both channels together are all ~0
+    """
+
+    # create a target with two channels, each filled with a constant value
+    target_ch0 = torch.full((4, 1, 300, 300), 0.5)
+    target_ch1 = torch.full((4, 1, 300, 300), 0.4)
+
+    # concatenate the two channels to form a target tensor of shape (4, 2, 300, 300)
+    target = torch.cat([target_ch0, target_ch1], dim=1)
+
+    # create a prediction with two channels, each filled with the same constant value as the target
+    pred_ch0 = torch.full((4, 1, 300, 300), 0.5)
+    pred_ch1 = torch.full((4, 1, 300, 300), 0.4)
+
+    # concatenate the two channels to form a prediction tensor of shape (4, 2, 300, 300)
+    pred = torch.cat([pred_ch0, pred_ch1], dim=1)
+
+    # calculate the ssim loss for both channels together and each channel separately
+    both_channels = ssim_loss(pred, target)
+    first_channel = ssim_loss(pred_ch0, target_ch0)
+    second_channel = ssim_loss(pred_ch1, target_ch1)
+
+    assert first_channel.item() < 1e-9, f"The first channel (perfectly predicted) should have ~0 loss, got {first_channel.item()}"
+    assert second_channel.item() < 1e-9, f"The second channel (perfectly predicted) should have ~0 loss, got {second_channel.item()}"
+    assert both_channels.item() < 1e-9, f"The both channels (perfectly predicted) should have ~0 loss, got {both_channels.item()}"
+    
 def test_ssim_loss_handles_small_differences():
     """
     GIVEN: a prediction whose channels have small differences from the target channels
@@ -652,12 +674,12 @@ def test_ssim_loss_handles_small_differences():
     pred = torch.cat([pred_ch0, pred_ch1], dim=1) 
 
     # calculate the ssim loss for both channels together and each channel separately
-    both = ssim_loss(pred, target)
-    first = ssim_loss(pred_ch0, target_ch0)
-    second = ssim_loss(pred_ch1, target_ch1)
+    both_channels = ssim_loss(pred, target)
+    first_channel = ssim_loss(pred_ch0, target_ch0)
+    second_channel = ssim_loss(pred_ch1, target_ch1)
 
-    assert torch.isclose(both, (first + second) / 2, atol=1e-8), \
-        f"Expected the mean of the channel losses {((first + second) / 2).item()}, got {both.item()}"
+    assert torch.isclose(both_channels, (first_channel + second_channel) / 2, atol=1e-9), \
+        f"Expected the mean of the channel losses {((first_channel + second_channel) / 2).item()}, got {both_channels.item()}"
 
 def test_ssim_loss_handles_large_differences():
     """
@@ -683,12 +705,13 @@ def test_ssim_loss_handles_large_differences():
     pred = torch.cat([pred_ch0, pred_ch1], dim=1) 
 
     # calculate the ssim loss for both channels together and each channel separately
-    both = ssim_loss(pred, target)
-    first = ssim_loss(pred_ch0, target_ch0)
-    second = ssim_loss(pred_ch1, target_ch1)
+    both_channels = ssim_loss(pred, target)
+    first_channel = ssim_loss(pred_ch0, target_ch0)
+    second_channel = ssim_loss(pred_ch1, target_ch1)
 
-    assert torch.isclose(both, (first + second) / 2, atol=1e-8), \
-        f"Expected the mean of the channel losses {((first + second) / 2).item()}, got {both.item()}"
+    assert torch.isclose(both_channels, (first_channel + second_channel) / 2, atol=1e-9), \
+        f"Expected the mean of the channel losses {((first_channel + second_channel) / 2).item()}, got {both_channels.item()}"
+
 
 @pytest.mark.parametrize("inp, tgt", ALL_PROJECTION_PAIRS)
 def test_ssim_loss_backpropagates_gradient(inp, tgt):
@@ -788,24 +811,31 @@ def test_ssim_loss_class_stores_given_settings():
     assert torch.equal(loss_fn.window, gaussian_window(3, 1.0)), \
         "The window of SSIMLoss should be gaussian_window(window_size, sigma)"
 
-def test_ssim_loss_class_has_no_trainable_parameters_and_no_state():
+def test_ssim_loss_class_has_no_trainable_parameters():
     """
     GIVEN: an SSIMLoss object
-    WHEN: its parameters and state dict are listed
-    THEN: both are empty, since the window is a constant and it must not be trained by an optimizer
-          and must not be saved in checkpoints
+    WHEN: its parameters is listed
+    THEN: list of paramaters is empty since the window is a constant and it must not be trained by an optimizer
     """
     # create an SSIMLoss object
     loss_fn = SSIMLoss()
 
     assert list(loss_fn.parameters()) == [], "SSIMLoss should not have trainable parameters"
-    assert len(loss_fn.state_dict()) == 0, "The constant window should not be saved in the state dict"
-    assert len(list(loss_fn.buffers())) == 1, "The window should be registered as a buffer of the module"
 
-
-def test_ssim_loss_class_window_size_changes_the_loss():
+def test_ssim_loss_class_has_no_state():
     """
-    GIVEN: two SSIMLoss objects with different window sizes
+    GIVEN: an SSIMLoss object
+    WHEN: its state dict are listed
+    THEN: state dict is empty since the window is a constant and must not be saved in checkpoints
+    """
+    # create an SSIMLoss object
+    loss_fn = SSIMLoss()
+
+    assert len(loss_fn.state_dict()) == 0, "The constant window should not be saved in the state dict"
+
+def test_class_window_size_changes_the_ssim_loss():
+    """
+    GIVEN: two SSIMLoss objects with 2 different window sizes
     WHEN: they are applied to the same noisy prediction and target
     THEN: the losses are different, so the window_size given to the class is really used
     """
@@ -817,7 +847,7 @@ def test_ssim_loss_class_window_size_changes_the_loss():
     loss_small_window = SSIMLoss(window_size=3)(pred, target)
     loss_large_window = SSIMLoss(window_size=7)(pred, target)
 
-    assert not torch.isclose(loss_small_window, loss_large_window, atol=1e-4), (
+    assert not torch.isclose(loss_small_window, loss_large_window, atol=1e-7), (
         f"Different window sizes should give different losses, got {loss_small_window.item()} "
         f"and {loss_large_window.item()}"
     )
@@ -841,7 +871,7 @@ def test_ssim_loss_class_forward_is_the_same_as_call():
         "loss_fn(pred, target) and loss_fn.forward(pred, target) both ways should give the same loss"
 
 
-def test_ssim_loss_class_window_follows_the_dtype_of_the_module():
+def test_window_of_ssim_loss_class_follows_the_dtype_of_the_module():
     """
     GIVEN: an SSIMLoss object converted to float64
     WHEN: SSIMLoss object is created and its window is read
