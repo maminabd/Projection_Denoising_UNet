@@ -1,5 +1,5 @@
 ## Projection_Denoising_UNet
-This repository contains a 2D UNet for denoising dual-energy X-ray projections (Low Energy and High Energy channels), written in PyTorch.
+This repository provides a PyTorch implementation of a 2D U-Net for denoising dual-energy cone-beam CT projections in the low-energy and high-energy channels.
 
 - [Projection Denoising UNet](#projection_denoising_unet)
   - [Overview](#overview)
@@ -22,7 +22,7 @@ The model used in this project is a 2D UNet with residual blocks [2], where each
 
 This project has two modes: training and prediction.
 
-- **Training mode:** after downloading the dataset (see [Prepare Data](#prepare-data)), you can train the model with it. Alternatively, you can skip training and use the pre-trained model [UNet_best.pth](./).
+- **Training mode:** after downloading the dataset (see [Prepare Data](#prepare-data)), you can train the model with it. Alternatively, you can skip training and use the pre-trained model which can be downloaded from this [link](https://liveunibo-my.sharepoint.com/:u:/g/personal/mohammadamin_abdoli_studio_unibo_it/IQB1jMtvauMBRbAlh6o3WATTAYIPfXN58pJ9a8_fuKB2MNg) which requires 135 MB of disk space.
 - **Prediction mode:** the model predicts the denoised projections corresponding to the given noisy projections. The folder [prediction_dataset](./prediction_dataset) contains 12 pairs of noisy/noiseless projections that are used to evaluate the performance of the trained UNet. These 12 pairs are projections of 3 different mice that were not part of the training dataset, so they are completely new for the model.
 
 ---
@@ -49,15 +49,15 @@ All modules are located in the [libraries folder](./libs)
 |:----------|:---------------|
 | [dataset](libs/dataset.py) | Checks the data files and loads input/target projection pairs, train/validation split, create a batch of projections|
 | [unet](libs/unet.py) | The model: the residual block (ResBlock) and the 2D UNet built from it. The UNet consists of an encoder, a bottleneck and a decoder. The encoder has 4 levels (32, 64, 128 and 256 channels); at each level a residual block extracts features and max pooling halves the spatial size, so the encoder captures the content of the projection at several scales. The bottleneck (512 channels) is the deepest level of the network. The decoder mirrors the encoder: transposed convolutions double the spatial size step by step, and skip connections concatenate the encoder features of the same level, which gives back the fine details lost by poolings of encoder. The residual connection inside each block adds the input of the block to its output, which makes the training of the deep network easier and more stable. Dropout layers are used in the deeper levels to reduce overfitting. A final convolution maps the features to the 2 output channels (denoised LE and HE). |
-| [utils](libs/utils.py) | Helper functions: device setup (use cuda or cpu), save/load checkpoints, plot histories, plot comparisons of projections  |
+| [utils](libs/utils.py) | Helper functions: device setup (use cuda or cpu), save/load checkpoints, plot histories, calculate the absolute differences between denoised and ground truth projections, plot comparisons of projections  |
 | [losses](libs/losses.py) | Contains all the loss functions and the combined denoising loss that gathers all 3 loss components together:<br>• `SSIMLoss`: a class of the SSIM loss [3], 1 - SSIM, which captures structural differences between the predicted and target projections. It uses a Gaussian window (built by the `gaussian_window` function) with the given `window_size` and `sigma`, e.g. `SSIMLoss(window_size=3)(prediction, target)`<br>• `gradient_loss`: edge-preserving loss, the MSE between the gradients of the predicted and target projections<br>• `denoising_loss`: the weighted sum of the MAE, the SSIM loss (3x3 window) and the gradient loss |
 | [data augmentation](libs/data_augmentation.py) | Contains the geometrical transformations (rotating and flipping functions) used for data augmentation. Data augmentation is applied only in the training process (not in validation) to expand the training dataset and reduce the risk of overfitting. The transformations create variations of the projections, so the model cannot just learn a few common patterns of the training dataset to reduce the loss, and it becomes more robust. |
 
 Here is the directory structure of the repository:
 
-- [training dataset]
-  - [input]
-  - [target]
+- training dataset
+  - input
+  - target
 
 - [prediction_dataset](./prediction_dataset)
   - [noisy projection](./prediction_dataset/noisy_projs)
@@ -65,47 +65,58 @@ Here is the directory structure of the repository:
 
 - [tests](./tests)
   - [projections for testing](./tests/projections_for_testing)
+  - [test_data_aug.py](tests/test_data_aug.py)
   - [test_dataset.py](tests/test_dataset.py)
   - [test_losses.py](tests/test_losses.py)
   - [test_utils.py](tests/test_utils.py)
-  - [test_data_aug.py](tests/test_data_aug.py)
   - [test_unet.py](tests/test_unet.py)
 
 - [libraries](./libs)
+  - [data_augmentation.py](./libs/data_augmentation.py)
   - [dataset.py](./libs/dataset.py)
   - [losses.py](./libs/losses.py)
-  - [UNet.py](./libs/unet.py)
+  - [unet.py](./libs/unet.py)
   - [utils.py](./libs/utils.py)
-  - [data_augmentation.py](./libs/data_augmentation.py)
+  
 
 - [training.py](./training.py)
-- [prediction.py](./prediction.py)
+- [predict.py](./predict.py)
 
 ---
 ### Installation & Setup
-In order to use this project, go to the directory where you want to build the project and clone this repository there:
+In order to use this project, navigate to the directory where you want to build the project:
+
+```bash
+cd path/to/my_projects_folder
+```
+
+and clone the repository there:
 
 ```bash
 git clone https://github.com/maminabd/Projection_Denoising_UNet.git
 ```
 
-Next, create a virtual environment dedicated for the project:
+Next, create a virtual environment dedicated for the project. You can create it either in the folder where you cloned the project, or
+you can open a new terminal (cmd on Windows, bash on Linux) that starts from `c:/users/user_name` or `home/user_name` and create the environment there. Create the environment by using:
 
 ```bash
 python -m venv denoising_env
 ```
 
-Activate the newly created environment:
+Then activate the newly created environment:
 
-**On Windows:**
+**On Windows cmd:**
+
 ```bash
 denoising_env\Scripts\activate
 ```
 
 **On Linux and macOS:**
+
 ```bash
 source denoising_env/bin/activate
 ```
+
 Finally, go to the project directory:
 
 ```bash
@@ -118,7 +129,9 @@ Install the required dependencies of this project listed in [requirements.txt](h
 pip install -r requirements.txt
 ```
 
-Once all the dependencies have been installed, the environment is ready to be used for this project.
+For the next sessions of working with the project, you only need to activate the environment again, from any directory, by using the path to its `activate` file.
+
+The minimum versions of the libraries are written in [requirements.txt](./requirements.txt); the project was developed and tested with Python 3.11 on Linux and Windows 11. Once all the dependencies have been installed, the environment is ready to be used for this project.
 
 ---
 ### Testing
@@ -135,7 +148,7 @@ To run a single test file or a single test you need to execute:
 
 ```bash
 pytest tests/test_dataset.py
-pytest tests/test_dataset.py::test_split_files_sizes
+pytest tests/test_dataset.py::test_check_files_length_mismatch_raises
 ```
 
 #### Running Tests with Coverage
@@ -172,7 +185,7 @@ For this project, the tests cover 100% of codes in `libs/`.
 ### Prepare Data
 The model expects one dataset directory containing 2 subfolders, "input" and "target", each containing mouse projection `.npy` files at different angles. Each `.npy` file in the "input" folder must correspond to a file in the "target" folder with the same name.
 
-The dataset containing 5400 pairs of projections of 15 different mice can be downloaded from this [link](https://liveunibo-my.sharepoint.com/:u:/g/personal/mohammadamin_abdoli_studio_unibo_it/IQCQOj_Bmr09QbBFEW7XAaVLAULFPKUab1RU6rxNfJKIRQs?e=pSozAf). When the download is finished, a `.tar.xz` file called "training_dataset" with size 2.7 GB is created in the download directory. Navigate to that directory:
+The dataset containing 5400 pairs of projections of 15 different mice can be downloaded from this [link](https://liveunibo-my.sharepoint.com/:u:/g/personal/mohammadamin_abdoli_studio_unibo_it/IQCQOj_Bmr09QbBFEW7XAaVLASqEqncbQQq4b3usm4rdPyU). When the download is finished, a `.tar.xz` file called "training_dataset" with size 2.7 GB is created in the download directory. Navigate to that directory:
 
 ```bash
 cd path/to/download/directory
@@ -184,7 +197,7 @@ Then decompress the file with the following command (note that the decompressed 
 tar -xvf training_dataset.tar.xz
 ```
 
-Each `.npy` file is a CBCT projection of a mouse in frontal (coronal) plane, with shape `(300, 300, 2)`. The last axis is the two channels: index 0 is LE (Low Energy projection) and index 1 is HE (High Energy projection). All projections are expected to already be normalized to the `[0, 1]` range.
+Each `.npy` file is a CBCT projection of a mouse in frontal (coronal) plane, with shape `(300, 300, 2)`. The last axis is the two channels: index 0 is LE (Low Energy projection) and index 1 is HE (High Energy projection). All projections are expected to already be normalized to the `[0, 1]` range. The `float32` (32-bit floating point numbers) format was chosen for projection files because PyTorch works natively with it (it is the default data type of its tensors and models, so no further conversions are needed), and it gives a good precision for the intensities in `[0, 1]` for its size, using half of the memory of `float64`.
 
 ---
 ### Training
@@ -208,6 +221,9 @@ You can also set the following training hyperparameters or options:
 
 - Check if the dataset is valid for training (--check_dataset). If you omit this option, the code skips the checking the dataset (default), and you if add --check_dataset with any variable e.g. --check_dataset 1, it runs the check_dataset which may take some time. If check_dataset confirms the dataset for the first training, --check_dataset can be omitted for subsequent trainings.
 
+Run `python training.py --help` to see the full list of training options.
+
+
 Here are some examples for training:
 
 For the first training:
@@ -229,7 +245,7 @@ To monitor save the results of training more frequently, you can set lower value
 python training.py --dataset "path/to/training_dataset" --plot_every 5 --save_model_every 10
 ```
 
-Run `python training.py --help` to see the full list. The remaining settings (learning rate, scheduler parameters and validation fraction) are constants at the top of [training.py](training.py).
+The remaining settings (learning rate, scheduler parameters and validation fraction) are constants at the top of [training.py](training.py). The random seeds are fixed (`SEED` in [training.py](training.py)), so a training is replicable.
 
 ---
 ### Prediction
@@ -239,7 +255,7 @@ Once a UNet model with high accuracy is trained, we can use it to denoise unseen
 python predict.py --noisy ./prediction_dataset/noisy_projs --groundtruth ./prediction_dataset/groundtruth --model ./UNet_best.pth
 ```
 
-The [predict.py](./predict.py) saves the denoised projections in  and also compares the denoised projections with the noiseless ones and saves the comparison results as a picture. For this, you can also set the directory where denoised `.npy` files and the comaprison pictures are saved by using `--output`  (default: `--output ./predicted_results`).
+The [predict.py](./predict.py) saves the denoised projections in the output directory and also compares the denoised projections with the noiseless ones and saves the comparison results as a picture. For this, you can also set the directory where denoised `.npy` files and the comparison pictures are saved by using `--output`  (default: `--output ./predicted_results`).
 
 ---
 #### Prediction Results
@@ -249,8 +265,8 @@ The 12 pairs of projections in [prediction_dataset](./prediction_dataset) were d
 
 | **Channel** | **Mean absolute difference** |
 |:-----------:|:----------------------------:|
-| LE (Low Energy) | 0.001977 |
-| HE (High Energy) | 0.001571 |
+| LE (Low Energy) | 0.002164 |
+| HE (High Energy) | 0.001779 |
 
 The projections are normalized to the `[0, 1]` range, so these values are very small compared to the intensity range.
 
