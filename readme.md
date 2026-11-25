@@ -197,7 +197,7 @@ Each `.npy` file is a CBCT projection of a mouse in frontal (coronal) plane, wit
 When the dataset is ready, we can train the model with the [training script](./training.py). The path to the training_dataset directory is required.
 
 ```bash
-python training.py --dataset "path/to/training_dataset" 
+python training.py --dataset path/to/training_dataset
 ```
 
 You can also set the following training hyperparameters or options:
@@ -219,33 +219,35 @@ Run `python training.py --help` to see the full list of training options.
 
 Here are some examples for training:
 
+The training dataset and pre-trained model are assumed to be downloaded and be located in the directory of project.
+
 For the first training:
 
 ```bash
-python training.py --dataset "path/to/training_dataset" --check_dataset 1
+python training.py --dataset ./training_dataset --check_dataset 1
 ```
 
 To continue training from a checkpointed model:
 
 ```bash
-python training.py --dataset "path/to/training_dataset" --epochs 200 --resume UNet_epoch_025.pth
+python training.py --dataset ./training_dataset --epochs 300 --resume ./pre_trained.pth
 ```
 
 To monitor save the results of training more frequently, you can set lower values for plot_every and save_model_every.
 
 
 ```bash
-python training.py --dataset "path/to/training_dataset" --plot_every 5 --save_model_every 10
+python training.py --dataset ./training_dataset --plot_every 5 --save_model_every 10
 ```
 
-The remaining settings (learning rate, scheduler parameters and validation fraction) are constants at the top of [training.py](training.py). The random seeds are fixed (`SEED` in [training.py](training.py)), so a training is replicable.
+The remaining settings (learning rate, scheduler parameters and validation fraction) are constants at the top of [training.py](./training.py). The random seeds are fixed (`SEED` in [training.py](training.py)), so a training is replicable.
 
 ---
 ### Prediction
 Once a UNet model with is trained, we can use it to denoise unseen mouse projections with the same Poisson noise that the training dataset projections have. To do so, run the [predict script](./predict.py), which requires path to the folder of noisy projections, path to the folder of the corresponding noiseless ground truth for the evaluation and path to the trained model file (.pth). The following command denoises the projection samples provided in [prediction_dataset folder](./prediction_dataset) using a trained model.
 
 ```bash
-python predict.py --noisy ./prediction_dataset/noisy_projs --groundtruth ./prediction_dataset/groundtruth --model ./UNet_best.pth
+python predict.py --noisy ./prediction_dataset/noisy_projs --groundtruth ./prediction_dataset/groundtruth --model ./pre_trained.pth
 ```
 
 The [predict.py](./predict.py) saves the denoised projections in the output directory and also compares the denoised projections with the noiseless ones and saves the comparison results as a picture. For this, you can also set the directory where denoised `.npy` files and the comparison pictures are saved by using `--output`  (default: `--output ./predicted_results`).
