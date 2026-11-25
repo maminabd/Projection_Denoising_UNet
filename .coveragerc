@@ -4,9 +4,6 @@
 source = libs
 omit =
     libs/__init__.py
-    libs/utils.py:get_device
-    libs/utils.py:plot_history
-    libs/utils.py:projs_comparison
     training.py
     predict.py
     tests/*
