@@ -1,5 +1,7 @@
 
 import logging
+import matplotlib
+matplotlib.use("Agg")  # non-interactive backend: plots are only saved to file
 import matplotlib.pyplot as plt
 import torch
 
