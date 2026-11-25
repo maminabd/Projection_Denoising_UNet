@@ -22,7 +22,7 @@ The model used in this project is a 2D UNet with residual blocks [2], where each
 
 This project has two modes: training and prediction.
 
-- **Training mode:** after downloading the dataset (see [Prepare Data](#prepare-data)), you can train the model with it. Alternatively, you can skip training and use the pre-trained model which can be downloaded from this [link](https://liveunibo-my.sharepoint.com/:u:/g/personal/mohammadamin_abdoli_studio_unibo_it/IQB1jMtvauMBRbAlh6o3WATTAYIPfXN58pJ9a8_fuKB2MNg) which requires 140 MB of disk space.
+- **Training mode:** after downloading the dataset (see [Prepare Data](#prepare-data)), you can train the model with it. Alternatively, you can skip training and use the pre-trained model which can be downloaded from this [link](https://liveunibo-my.sharepoint.com/:u:/g/personal/mohammadamin_abdoli_studio_unibo_it/IQAZhArrk4VvQ61gbn3tCHs1AUKljKbWfupxiHWrLnK51h0) which requires 140 MB of disk space.
 - **Prediction mode:** the model predicts the denoised projections corresponding to the given noisy projections. The folder [prediction_dataset](./prediction_dataset) contains 12 pairs of noisy/noiseless projections that are used to evaluate the performance of the trained UNet. These 12 pairs are projections of 3 different mice that were not part of the training dataset, so they are completely new for the model.
 
 ---
@@ -55,9 +55,8 @@ All modules are located in the [libraries folder](./libs)
 
 Here is the directory structure of the repository:
 
-- training dataset
-  - input
-  - target
+- [training.py](./training.py)
+- [predict.py](./predict.py)
 
 - [prediction_dataset](./prediction_dataset)
   - [noisy projection](./prediction_dataset/noisy_projs)
@@ -77,10 +76,6 @@ Here is the directory structure of the repository:
   - [losses.py](./libs/losses.py)
   - [unet.py](./libs/unet.py)
   - [utils.py](./libs/utils.py)
-  
-
-- [training.py](./training.py)
-- [predict.py](./predict.py)
 
 ---
 ### Installation & Setup
@@ -180,7 +175,7 @@ The command-line scripts (`training.py` and `predict.py`), the tests and the fun
 For this project, the tests cover 100% of included codes in `libs/`.
 
 ---
-### Prepare Data
+### Prepare Dataset
 For training the UNet model, a dataset containing 2 subfolders, "input" and "target" is expected. Each subfolder should contain mouse projection `.npy` files at different angles. The `.npy` file in the "input" folder must correspond to a `.npy` file in the "target" folder with the same name.
 
 The dataset containing 5400 pairs of projections of 15 different mice can be downloaded from this [link](https://liveunibo-my.sharepoint.com/:u:/g/personal/mohammadamin_abdoli_studio_unibo_it/IQCQOj_Bmr09QbBFEW7XAaVLASqEqncbQQq4b3usm4rdPyU). When the download is finished, a `.tar.xz` file called "training_dataset" with size 2.7 GB is created in the download directory. Navigate to that directory:
@@ -263,8 +258,8 @@ The 12 pairs of projections in [prediction_dataset](./prediction_dataset) were d
 
 | **Channel** | **Mean absolute difference** |
 |:-----------:|:----------------------------:|
-| LE (Low Energy) | 0.002164 |
-| HE (High Energy) | 0.001779 |
+| LE (Low Energy) | 0.001755 |
+| HE (High Energy) | 0.001585 |
 
 The projections are normalized to the `[0, 1]` range, so these values are very small compared to the intensity range.
 
