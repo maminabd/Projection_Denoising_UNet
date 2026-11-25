@@ -18,12 +18,8 @@ input_files, target_files = find_paired_files(
     os.path.join(PROJECTIONS_DIR, "input_testing"),
     os.path.join(PROJECTIONS_DIR, "target_testing"),)
 
-# load the paired input and target files as torch tensors                                                                                                                  
-ALL_PROJECTION_PAIRS = [
-    (load_as_tensor(inp), load_as_tensor(tgt))
-    for inp, tgt in zip(input_files, target_files)]
-
-ALL_PATH_PAIRS = list(zip(input_files, target_files))
+# create a list of touples from the paired input and target file paths
+ALL_PATH_PAIRS = list(zip(input_files, target_files)) 
 
 # define the rotation angles parameter for the tests
 ROTATION_KS = [1, 2, 3] # Rotation angles: k=1: 90° , k=2: 180° , k=3: 270°
@@ -569,13 +565,44 @@ def test_collate_batch_casts_to_float32(tmp_path):
 # tests for collate_augmented_batch function
 # ----------------------------------------------------
 
-@pytest.mark.parametrize("path_pairs", ALL_PATH_PAIRS)
-def test_collate_augmented_batch_is_unchanged_when_rotation_is_disabled(path_pairs):
+def test_collate_augmented_batch_stacks_pairs(tmp_path):
     """
-    GIVEN: batch of mouse projections while rotation augmentation is disabled but probability is 1
+    GIVEN: a list of (input_path, target_path) pairs
+    WHEN: collate_augmented_batch is called
+    THEN: the stacked data (batch) of inputs and targets have
+          shape of (Batch size, number of Channels=2, H=300, W=300)
+    """
+
+    # create directories and files
+    input_dir =  tmp_path / "input"
+    target_dir = tmp_path / "target"
+    input_dir.mkdir()
+    target_dir.mkdir()
+
+    path_pairs = []
+    # consider batch size is 8
+    batch_size = 8
+    for i in range(batch_size):
+        inp_file = input_dir / f"mouse_{i}.npy"
+        np.save(inp_file, np.full(IMAGE_SHAPE, 0.5, dtype=np.float32))
+        tg_file = target_dir / f"mouse_{i}.npy"
+        np.save(tg_file, np.full(IMAGE_SHAPE, 0.5, dtype=np.float32))
+        path_pairs.append((inp_file, tg_file))
+
+    inputs, targets = collate_augmented_batch(path_pairs, use_augmentation=False)
+
+    assert inputs.shape == (batch_size, 2, 300, 300), f"Unexpected inputs shape: {tuple(inputs.shape)}"
+    assert targets.shape == (batch_size, 2, 300, 300), f"Unexpected targets shape: {tuple(targets.shape)}"
+
+
+@pytest.mark.parametrize("path_pairs", ALL_PATH_PAIRS)
+def test_collate_augmented_batch_acts_like_collate_batch_when_data_augmentation_is_disabled(path_pairs):
+    """
+    GIVEN: batch of mouse projections while data augmentation is disabled but
+           rotation and flipping has probability of 1
     WHEN: collate_augmented_batch is called
     THEN: the batch returned by collate_augmented_batch equals
-          the one returned by collate_batch (without augmentation).
+          the one returned by collate_batch (it means no transformation).
     """
 
     path_pairs = [path_pairs]
@@ -586,22 +613,23 @@ def test_collate_augmented_batch_is_unchanged_when_rotation_is_disabled(path_pai
         path_pairs,
         use_augmentation=False,
         rotation_probability=1.0,
-        flip_probability=0.0
+        flip_probability=1.0
     )
 
     assert torch.equal(inputs, expected_inputs), \
-        "The inputs changed although rotation augmentation is disabled"
+        "The inputs changed although data augmentation is disabled"
 
     assert torch.equal(targets, expected_targets), \
-        "The targets changed although rotation augmentation is disabled"
+        "The targets changed although data augmentation is disabled"
 
 @pytest.mark.parametrize("path_pairs", ALL_PATH_PAIRS)
-def test_collate_augmented_batch_is_unchanged_with_zero_probabilities(path_pairs):
+def test_collate_augmented_batch_acts_like_collate_batch_when_zero_probabilities(path_pairs):
     """
-    GIVEN: batch of mouse projections while rotation probability is 0 for augmentation.
+    GIVEN: batch of mouse projections while rotation and flipping probability are 0
+           but data augmentation is enabled.
     WHEN: collate_augmented_batch is called.
     THEN: the batch returned by collate_augmented_batch equals
-          the one returned by collate_batch (without augmentation).
+          the one returned by collate_batch (it means no transformation).
     """
     
     path_pair = [path_pairs]
@@ -615,14 +643,14 @@ def test_collate_augmented_batch_is_unchanged_with_zero_probabilities(path_pairs
         flip_probability=0.0
     )
 
-    assert torch.equal(inputs, expected_inputs), "The inputs changed although the rotation probability is 0"
-    assert torch.equal(targets, expected_targets), "The targets changed although the rotation probability is 0"
+    assert torch.equal(inputs, expected_inputs), "The inputs changed although the rotation and flipping probability is 0"
+    assert torch.equal(targets, expected_targets), "The targets changed although the rotation and flipping probability is 0"
 
 @pytest.mark.parametrize("path_pair", ALL_PATH_PAIRS[:1]) 
-# only test on the first projection pair to avoid long test time
-def test_collate_augmented_batch_rotates_expected_numberof_projections(path_pair):
+# only test on the first projection pair to avoid long test time since it is 100 copies of the same projection
+def test_collate_augmented_batch_rotates_expected_number_of_projections(path_pair):
     """
-    GIVEN: a batch of 100 copies of a mouse projection while rotation is enabled
+    GIVEN: a batch of 100 copies of one mouse projection while only rotation is enabled
            with a probability of 0.25 for augmentation
     WHEN: collate_augmented_batch is called with a seeded generator
     THEN: about 25% of the projections are rotated
@@ -633,7 +661,7 @@ def test_collate_augmented_batch_rotates_expected_numberof_projections(path_pair
     original_inputs, _ = collate_batch(path_pairs)
 
     # Seed the random generator to make the test reproducible
-    random.seed(0)
+    random.seed(42)
 
     inputs, _ = collate_augmented_batch(
         path_pairs,
@@ -654,17 +682,16 @@ def test_collate_augmented_batch_rotates_expected_numberof_projections(path_pair
 @pytest.mark.parametrize("path_pair", ALL_PATH_PAIRS[:1]) # only test on the first pair to avoid long test time
 def test_collate_augmented_batch_flips_about_the_expected_share_of_projections(path_pair):
     """
-    GIVEN: only the flipping enabled with a probability of 0.25, and a batch of 100 copies
-           of the same real projection
+    GIVEN: a batch of 100 copies of one mouse projection while only flipping is enabled
+           with a probability of 0.25 for augmentation
     WHEN: collate_augmented_batch is called with a seeded generator
-    THEN: about 25% of the projections are flipped (the decision is taken for each projection,
-          not once for the whole batch)
+    THEN: about 25% of the projections are flipped
     """
 
     path_pair = [path_pair]
     original_inputs, _ = collate_batch(path_pair)
 
-    random.seed(0)
+    random.seed(42)
 
     inputs, _ = collate_augmented_batch(
         path_pair*100,
@@ -687,7 +714,7 @@ def test_collate_augmented_batch_uses_every_rotation_angle(path_pair):
 
     """
     GIVEN: a batch of many copies of the same mouse projection while
-           the rotation enabled with a probability of 1.
+           only the rotation enabled with a probability of 1.
     WHEN: collate_augmented_batch is called with a seeded generator.
     THEN: every rotation (k=1, 2 and 3) occurs in the batch,
     """
@@ -701,7 +728,7 @@ def test_collate_augmented_batch_uses_every_rotation_angle(path_pair):
     rotation_case3 = torch.rot90(original_inputs[0], 3, dims=[1, 2])
     all_rotation_cases = [rotation_case1, rotation_case2, rotation_case3]
     
-    random.seed(0)
+    random.seed(42)
 
     inputs, _ = collate_augmented_batch(
         path_pair*100,
@@ -739,7 +766,7 @@ def test_collate_augmented_batch_uses_every_flip_type(path_pair):
     flip_case3 = torch.flip(original_inputs[0], dims=[1, 2])
     all_flip_cases = [flip_case1, flip_case2, flip_case3]
 
-    random.seed(0)
+    random.seed(42)
 
     inputs, _ = collate_augmented_batch(
         path_pairs*100,
@@ -780,7 +807,7 @@ def test_collate_augmented_batch_rotation_distribution_is_uniform(path_pair):
     rotation_case3 = torch.rot90(original_inputs[0], 3, dims=[1, 2])
     all_rotation_cases = [rotation_case1, rotation_case2, rotation_case3]
 
-    random.seed(0)
+    random.seed(42)
 
     batch_size = 300  # large enough for the counts to settle near the true probability
     inputs, _ = collate_augmented_batch(
@@ -805,7 +832,13 @@ def test_collate_augmented_batch_rotation_distribution_is_uniform(path_pair):
     proportion[3] = rotations_found[3] / batch_size
 
     expected_proportion = 1 / len(ROTATION_KS)  # should be 1/3 for all k values
-    tolerance = 0.03  # allow +/- 3 percentage points of random noise
+
+
+    # With 300 projections the standard deviation of each proportion is:
+    # std = sqrt( p * (1-p) / n ) = sqrt((1/3)*(2/3)/300) = sqrt(0.000741) = 0.027,
+    # in a normal approximation, ±2.6*std covers about 99% of outcomes => 2.6*0.027 = 0.07, which is 7 percent
+    # so a tolerance of 0.07 lets the test passes for any fixed random seed
+    tolerance = 0.07  # allow +/- 7 percentage points of random noise
 
     assert abs(proportion[1] - expected_proportion) < tolerance, (
                 f"Rotation k=1 occurred {proportion[1]:.2%} of the time, "
@@ -819,31 +852,62 @@ def test_collate_augmented_batch_rotation_distribution_is_uniform(path_pair):
                 f"Rotation k=3 occurred {proportion[3]:.2%} of the time, "
                 f"expected close to {expected_proportion:.2%}")
 
-def test_collate_augmented_batch_stacks_pairs(tmp_path):
+@pytest.mark.parametrize("path_pair", ALL_PATH_PAIRS[:1]) 
+# only test on the first pair to avoid long test time
+def test_collate_augmented_batch_flip_distribution_is_uniform(path_pair):
     """
-    GIVEN: a list of (input_path, target_path) pairs
-    WHEN: collate_batch is called
-    THEN: the stacked data (batch) of inputs and targets have
-          shape of (Batch size, number of Channels=2, H=300, W=300)
+    GIVEN: a batch of many copies of the same mouse projection while
+           the flipping enabled with a probability of 1.
+    WHEN: collate_augmented_batch is called with a seeded generator
+    THEN: each of the 3 possible flips (horizontal, vertical, both) occurs roughly 1/3 of the time,
+          confirming the flip type is chosen uniformly at random for each projection
     """
 
-    # create directories and files
-    input_dir =  tmp_path / "input"
-    target_dir = tmp_path / "target"
-    input_dir.mkdir()
-    target_dir.mkdir()
+    path_pair = [path_pair]
+    original_inputs, _ = collate_batch(path_pair)
 
-    path_pairs = []
-    # consider batch size is 8
-    batch_size = 8
-    for i in range(batch_size):
-        inp_file = input_dir / f"mouse_{i}.npy"
-        np.save(inp_file, np.full(IMAGE_SHAPE, 0.5, dtype=np.float32))
-        tg_file = target_dir / f"mouse_{i}.npy"
-        np.save(tg_file, np.full(IMAGE_SHAPE, 0.5, dtype=np.float32))
-        path_pairs.append((inp_file, tg_file))
+    # The 3 possible cases of flipping a (C, H, W) tensor, in the order of FLIP_TYPES.
+    flip_case0 = torch.flip(original_inputs[0], dims=[2])     # horizontal flip: along the width
+    flip_case1 = torch.flip(original_inputs[0], dims=[1])     # vertical flip: along the height
+    flip_case2 = torch.flip(original_inputs[0], dims=[1, 2])  # both flips
+    all_flip_cases = [flip_case0, flip_case1, flip_case2]
 
-    inputs, targets = collate_augmented_batch(path_pairs, use_augmentation=False)
+    random.seed(42)
 
-    assert inputs.shape == (batch_size, 2, 300, 300), f"Unexpected inputs shape: {tuple(inputs.shape)}"
-    assert targets.shape == (batch_size, 2, 300, 300), f"Unexpected targets shape: {tuple(targets.shape)}"
+    batch_size = 300  # large enough for the counts to settle near the true probability
+    inputs, _ = collate_augmented_batch(
+            path_pair*batch_size,
+            use_augmentation=True,
+            rotation_probability=0.0,
+            flip_probability=1.0
+        ) # rotation is disabled to avoid interference with flip counts
+
+    # Count how many times each flip type was found in the batch.
+    flips_found = {0: 0, 1: 0, 2: 0}
+    for projection in inputs:
+        for flip_type in FLIP_TYPES:
+            if torch.equal(projection, all_flip_cases[flip_type]):
+                flips_found[flip_type] += 1
+
+    # Convert counts into proportions out of the whole batch.
+    proportion = {flip_type: flips_found[flip_type] / batch_size for flip_type in FLIP_TYPES}
+
+    expected_proportion = 1 / len(FLIP_TYPES)  # should be 1/3 for all flip types
+
+    # With 300 projections the standard deviation of each proportion is:
+    # std = sqrt( p * (1-p) / n ) = sqrt((1/3)*(2/3)/300) = sqrt(0.000741) = 0.027,
+    # in a normal approximation, ±2.6*std covers about 99% of outcomes => 2.6*0.027 = 0.07, which is 7 percent
+    # so a tolerance of 0.07 lets the test passes for any fixed random seed
+    tolerance = 0.07  # allow +/- 7 percentage points of random noise
+
+    assert abs(proportion[0] - expected_proportion) < tolerance, (
+                f"Horizontal flip occurred {proportion[0]:.2%} of the time, "
+                f"expected close to {expected_proportion:.2%}")
+
+    assert abs(proportion[1] - expected_proportion) < tolerance, (
+                f"Vertical flip occurred {proportion[1]:.2%} of the time, "
+                f"expected close to {expected_proportion:.2%}")
+
+    assert abs(proportion[2] - expected_proportion) < tolerance, (
+                f"Both flips occurred {proportion[2]:.2%} of the time, "
+                f"expected close to {expected_proportion:.2%}")
