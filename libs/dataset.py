@@ -58,7 +58,7 @@ def check_files(input_files, target_files, image_shape=IMAGE_SHAPE):
     """
     Check three things:
 
-    1st: If the input data and output data have the same length (number of projections)
+    1st: If the input data and target data have the same length (number of projections)
 
     2nd: If the intensity values of every input/target file are in the range [0, 1].
 
@@ -102,7 +102,7 @@ def find_paired_files(input_dir, target_dir, pattern="*.npy"):
     """
 
 
-    # sort the path of .npy files of input and target.
+    # sort the paths of the files matching the pattern (.npy), so that the input and target files are in the same order.
     input_files = sorted(glob.glob(os.path.join(input_dir, pattern)))
     target_files = sorted(glob.glob(os.path.join(target_dir, pattern)))
 
@@ -118,7 +118,7 @@ def find_paired_files(input_dir, target_dir, pattern="*.npy"):
     if len(input_files) != len(target_files):
         raise ValueError("Number of input and target files differ!")
 
-    # extract the main name of .npy files of input and target
+    # extract the file names (without the directory) of input and target files
     input_names = [os.path.basename(name) for name in input_files]
     target_names = [os.path.basename(name) for name in target_files]
 
@@ -159,7 +159,9 @@ def split_files(input_files, target_files, validation_split=0.2, seed=42):
 def load_as_tensor(path):
     
     """
-    A helper function for "collate_batch", it loads .npy file and convert it into a PyTorch tensor. 
+    Load a .npy file and convert it into a PyTorch tensor.
+
+    It is used by the collate functions and by predict.py.
 
     Args:
         path: Path to a .npy file containing an (H, W, C) array.
@@ -170,7 +172,7 @@ def load_as_tensor(path):
     
     array_data = np.load(path).astype(np.float32)
     tensor_data = torch.from_numpy(array_data).permute(2, 0, 1)
-    # (H, W, C) -> (C, H, W), PyTorch expects the format that channel is first index
+    # (H, W, C) -> (C, H, W), PyTorch expects the channel as the first axis
 
     return tensor_data
 
@@ -220,14 +222,13 @@ def collate_augmented_batch(path_pairs, use_augmentation=False, rotation_probabi
 
     for input_tensor, target_tensor in zip(inputs, targets):
 
-        flip_type = random.randint(0, 2)  # 0: horizontal, 1: vertical, 2: both
-        angle = random.choice(ROTATION_KS)
-
         if use_augmentation and random.random() < rotation_probability:
+            angle = random.choice(ROTATION_KS)
 
             input_tensor, target_tensor = rotation_augmentation(input_tensor, target_tensor, angle)
 
         if use_augmentation and random.random() < flip_probability:
+            flip_type = random.randint(0, 2)  # 0: horizontal, 1: vertical, 2: both
             
             input_tensor, target_tensor = flipping_augmentation(input_tensor, target_tensor, flip_type)
         
