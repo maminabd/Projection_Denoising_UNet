@@ -51,7 +51,7 @@ class SSIMLoss(nn.Module):
     SSIM(x, y) = (2 * mu_x * mu_y + C1) * (2 * sigma_xy + C2) / 
                  ((mu_x^2 + mu_y^2 + C1) * (sigma_x^2 + sigma_y^2 + C2))
 
-    it is composed of multimplication of 3 terms: luminance * contrast * structure, where:
+    it is composed of multiplication of 3 terms: luminance * contrast * structure, where:
 
     the luminance term: (2 * mu_x * mu_y + C1) / (mu_x^2 + mu_y^2 + C1)
     the contrast term: (2 * sigma_x * sigma_y + C2) / (sigma_x^2 + sigma_y^2 + C2)
@@ -100,7 +100,7 @@ class SSIMLoss(nn.Module):
         Hence, ssim loss = 1 - ssim (0 when the two batches are identical)
 
         Returns:
-                Scalar ssim loss, which is the average of the ssim values over all pixels and channels.
+                Scalar ssim loss, which is 1 minus the average of the ssim values over all pixels and channels.
         """
 
         C1 = (self.K1 * self.DATA_RANGE) ** 2
@@ -109,7 +109,7 @@ class SSIMLoss(nn.Module):
         B, C, height, width = pred.shape
 
         # Fold channels into the batch dim so each channel is convolved independently.
-        # which matchs the window shape (1, 1, window_size, window_size)
+        # which matches the window shape (1, 1, window_size, window_size)
         pred_flat = pred.reshape(B * C, 1, height, width)
         target_flat = target.reshape(B * C, 1, height, width)
 
@@ -168,15 +168,24 @@ def denoising_loss(predictions, targets, mae_weight=1, ssim_weight=1, gradient_w
     Combined denoising loss, computed on both channels (LE and HE).
 
     Args:
-        prediction: Predicted (denoised) projections, shape (B, C, H, W).
+        predictions: Predicted (denoised) projections, shape (B, C, H, W).
         targets: target (noiseless) projections, shape (B, C, H, W).
         mae_weight: Weight of the mean absolute error term.
         ssim_weight: Weight of the SSIM term with a 3x3 window.
         gradient_weight: Weight of the gradient term.
 
+    The three weights are normalized to sum to 1 before being used, so only their ratios matter
+    (e.g. weights 1, 1, 1 are the same as 0.5, 0.5, 0.5). They must not be all zero.
+
     Returns:
-        one scalar loss, which is the weighted sum of the three components.
+        one scalar loss, which is the weighted average of the three components.
     """
+    
+    sum_weights = mae_weight + ssim_weight + gradient_weight
+
+    mae_weight = mae_weight/sum_weights
+    ssim_weight = ssim_weight/sum_weights
+    gradient_weight = gradient_weight/sum_weights
 
     ssim_loss = SSIMLoss(window_size=3)
 
