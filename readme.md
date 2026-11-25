@@ -22,7 +22,7 @@ The model used in this project is a 2D UNet with residual blocks [2], where each
 
 This project has two modes: training and prediction.
 
-- **Training mode:** after downloading the dataset (see [Prepare Data](#prepare-data)), you can train the model with it. Alternatively, you can skip training and use the pre-trained model which can be downloaded from this [link](https://liveunibo-my.sharepoint.com/:u:/g/personal/mohammadamin_abdoli_studio_unibo_it/IQB1jMtvauMBRbAlh6o3WATTAYIPfXN58pJ9a8_fuKB2MNg) which requires 135 MB of disk space.
+- **Training mode:** after downloading the dataset (see [Prepare Data](#prepare-data)), you can train the model with it. Alternatively, you can skip training and use the pre-trained model which can be downloaded from this [link](https://liveunibo-my.sharepoint.com/:u:/g/personal/mohammadamin_abdoli_studio_unibo_it/IQB1jMtvauMBRbAlh6o3WATTAYIPfXN58pJ9a8_fuKB2MNg) which requires 140 MB of disk space.
 - **Prediction mode:** the model predicts the denoised projections corresponding to the given noisy projections. The folder [prediction_dataset](./prediction_dataset) contains 12 pairs of noisy/noiseless projections that are used to evaluate the performance of the trained UNet. These 12 pairs are projections of 3 different mice that were not part of the training dataset, so they are completely new for the model.
 
 ---
@@ -48,10 +48,10 @@ All modules are located in the [libraries folder](./libs)
 | **Module** | **Description** |
 |:----------|:---------------|
 | [dataset](libs/dataset.py) | Checks the data files and loads input/target projection pairs, train/validation split, create a batch of projections|
-| [unet](libs/unet.py) | The model: the residual block (ResBlock) and the 2D UNet built from it. The UNet consists of an encoder, a bottleneck and a decoder. The encoder has 4 levels (32, 64, 128 and 256 channels); at each level a residual block extracts features and max pooling halves the spatial size, so the encoder captures the content of the projection at several scales. The bottleneck (512 channels) is the deepest level of the network. The decoder mirrors the encoder: transposed convolutions double the spatial size step by step, and skip connections concatenate the encoder features of the same level, which gives back the fine details lost by poolings of encoder. The residual connection inside each block adds the input of the block to its output, which makes the training of the deep network easier and more stable. Dropout layers are used in the deeper levels to reduce overfitting. A final convolution maps the features to the 2 output channels (denoised LE and HE). |
+| [unet](libs/unet.py) | The main UNet architecture built by residual blocks (ResBlock). The UNet consists of an encoder, a bottleneck and a decoder. The encoder has 4 levels (32, 64, 128 and 256 channels) then the bottleneck (512 channels) is the deepest level of the UNet. The decoder mirrors the encoder, it has 4 levels (256, 128, 64 and 32 channels). There are skip connections concatenate the encoder features of each level to correspounding decoder. And Dropout layers are used in the deeper levels to reduce overfitting.|
 | [utils](libs/utils.py) | Helper functions: device setup (use cuda or cpu), save/load checkpoints, plot histories, calculate the absolute differences between denoised and ground truth projections, plot comparisons of projections  |
-| [losses](libs/losses.py) | Contains all the loss functions and the combined denoising loss that gathers all 3 loss components together:<br>• `SSIMLoss`: a class of the SSIM loss [3], 1 - SSIM, which captures structural differences between the predicted and target projections. It uses a Gaussian window (built by the `gaussian_window` function) with the given `window_size` and `sigma`, e.g. `SSIMLoss(window_size=3)(prediction, target)`<br>• `gradient_loss`: edge-preserving loss, the MSE between the gradients of the predicted and target projections<br>• `denoising_loss`: the weighted sum of the MAE, the SSIM loss (3x3 window) and the gradient loss |
-| [data augmentation](libs/data_augmentation.py) | Contains the geometrical transformations (rotating and flipping functions) used for data augmentation. Data augmentation is applied only in the training process (not in validation) to expand the training dataset and reduce the risk of overfitting. The transformations create variations of the projections, so the model cannot just learn a few common patterns of the training dataset to reduce the loss, and it becomes more robust. |
+| [losses](libs/losses.py) | Contains all loss functions and the denoising loss that combines all 3 loss components together:<br>• `SSIMLoss`: a class of the SSIM loss [3], 1 - SSIM, which captures structural differences between the predicted and target projections. It uses a Gaussian window (built by the `gaussian_window` function) with the given `window_size` and `sigma`, e.g. `SSIMLoss(window_size=3)(prediction, target)`<br>• `gradient_loss`: edge-preserving loss, the MSE between the gradients of the predicted and target projections<br>• `denoising_loss`: the weighted sum of the MAE, the SSIM loss (3x3 window) and the gradient loss |
+| [data augmentation](libs/data_augmentation.py) | Contains the geometrical transformations (rotating and flipping functions) used for data augmentation. Data augmentation is applied only in the training process (not in validation) to expand the training dataset and reduce the risk of overfitting.|
 
 Here is the directory structure of the repository:
 
@@ -135,7 +135,7 @@ The minimum versions of the libraries are written in [requirements.txt](./requir
 
 ---
 ### Testing
-The tests are in the [tests](./tests/) directory. Each file tests the module with the corresponding name in [libs](./libs). They are written with [pytest](https://docs.pytest.org/), which is already installed via requirements.txt, and do not require a GPU. Most of the tests generate the files they need in a temporary directory, and some of them need real projections, for which they use the mouse projections in the [projections_for_testing](./tests/projections_for_testing) folder.
+The tests are in the [tests](./tests/) directory. Each file tests the module with the corresponding name in [libs](./libs). They are written with [pytest](https://docs.pytest.org/), which is already installed via requirements.txt, and they do not require a GPU. Most of the tests generate the files they need in a temporary directory, and some of them need real projections, for which they use the mouse projections in the [projections_for_testing](./tests/projections_for_testing) folder.
 
 To run the whole group of tests from the main repository root you need to execute:
 
@@ -152,9 +152,7 @@ pytest tests/test_dataset.py::test_check_files_length_mismatch_raises
 ```
 
 #### Running Tests with Coverage
-Coverage is tracked with `coverage.py` and configured in [.coveragerc](./.coveragerc). Only the `libs/` package is measured; the command-line scripts (`training.py`, `predict.py`) and the tests themselves are omitted. 
-
-To run the whole tests with the coverage from the main repository root you need to execute:
+Coverage is tracked with `coverage.py` and configured in [.coveragerc](./.coveragerc). To run the whole tests with the coverage from the main repository root you need to execute:
 
 ```bash
 bash run_tests_coverage.sh
@@ -169,7 +167,7 @@ coverage report -m
 coverage html
 ```
 
-The terminal report lists the missing lines of each file, and the HTML report is saved in the `htmlcov` folder, which contains three main pages:
+The terminal report lists of missing lines of each python code, and the HTML report is saved in the `htmlcov` folder, which contains three main pages:
 
 - The [index.html](htmlcov/index.html) file contains a summary of the coverage statistics, including the percentage of each file covered by tests. You can click on each file to see a detailed view of the code, with lines highlighted to indicate which lines were executed during testing and which were not. 
 
@@ -177,13 +175,13 @@ The terminal report lists the missing lines of each file, and the HTML report is
 
 - The [function_index.html](htmlcov/function_index.html) file provides a function-level view of the coverage report, showing which functions were covered by tests and which were not.
 
-The command-line scripts (`training.py` and `predict.py`) and the functions that only display or save pictures or select the device (`get_device`, `plot_history` and `projs_comparison` in [utils](libs/utils.py)) are intentionally excluded from the coverage measurement. 
+The command-line scripts (`training.py` and `predict.py`), the tests and the functions that only display or save pictures or select the device (`get_device`, `plot_history` and `projs_comparison` in [utils](libs/utils.py)) are intentionally excluded from the coverage measurement. 
 
-For this project, the tests cover 100% of codes in `libs/`.
+For this project, the tests cover 100% of included codes in `libs/`.
 
 ---
 ### Prepare Data
-The model expects one dataset directory containing 2 subfolders, "input" and "target", each containing mouse projection `.npy` files at different angles. Each `.npy` file in the "input" folder must correspond to a file in the "target" folder with the same name.
+For training the UNet model, a dataset containing 2 subfolders, "input" and "target" is expected. Each subfolder should contain mouse projection `.npy` files at different angles. The `.npy` file in the "input" folder must correspond to a `.npy` file in the "target" folder with the same name.
 
 The dataset containing 5400 pairs of projections of 15 different mice can be downloaded from this [link](https://liveunibo-my.sharepoint.com/:u:/g/personal/mohammadamin_abdoli_studio_unibo_it/IQCQOj_Bmr09QbBFEW7XAaVLASqEqncbQQq4b3usm4rdPyU). When the download is finished, a `.tar.xz` file called "training_dataset" with size 2.7 GB is created in the download directory. Navigate to that directory:
 
@@ -197,11 +195,11 @@ Then decompress the file with the following command (note that the decompressed 
 tar -xvf training_dataset.tar.xz
 ```
 
-Each `.npy` file is a CBCT projection of a mouse in frontal (coronal) plane, with shape `(300, 300, 2)`. The last axis is the two channels: index 0 is LE (Low Energy projection) and index 1 is HE (High Energy projection). All projections are expected to already be normalized to the `[0, 1]` range. The `float32` (32-bit floating point numbers) format was chosen for projection files because PyTorch works natively with it (it is the default data type of its tensors and models, so no further conversions are needed), and it gives a good precision for the intensities in `[0, 1]` for its size, using half of the memory of `float64`.
+Each `.npy` file is a CBCT projection of a mouse in frontal (coronal) plane, with shape `(300, 300, 2)`. The last axis is the two channels: index 0 is LE (Low Energy projection) and index 1 is HE (High Energy projection). All projections are already normalized to the `[0, 1]` range. The `float32` (32-bit floating point numbers) format was chosen for projection files because PyTorch works natively with it (it is the default data type of its tensors and models, so no further conversions are needed), and it gives a good precision for the intensities in `[0, 1]` for its size, using half of the memory of `float64`.
 
 ---
 ### Training
-When the dataset is ready, we can train the model with the training script. The path to the training_dataset directory is required for training.
+When the dataset is ready, we can train the model with the [training script](./training.py). The path to the training_dataset directory is required.
 
 ```bash
 python training.py --dataset "path/to/training_dataset" 
@@ -219,7 +217,7 @@ You can also set the following training hyperparameters or options:
 
 - Path to checkpoint (.pth) to continue training from (--resume)
 
-- Check if the dataset is valid for training (--check_dataset). If you omit this option, the code skips the checking the dataset (default), and you if add --check_dataset with any variable e.g. --check_dataset 1, it runs the check_dataset which may take some time. If check_dataset confirms the dataset for the first training, --check_dataset can be omitted for subsequent trainings.
+- Check if the dataset is valid for training (--check_dataset). If you omit this option, the code skips checking the dataset (default), and if you add --check_dataset with any variable e.g. --check_dataset 1, it runs the check_dataset which may take some time. If check_dataset confirms the dataset for the first training, --check_dataset can be omitted for subsequent trainings.
 
 Run `python training.py --help` to see the full list of training options.
 
@@ -249,7 +247,7 @@ The remaining settings (learning rate, scheduler parameters and validation fract
 
 ---
 ### Prediction
-Once a UNet model with high accuracy is trained, we can use it to denoise unseen mouse projections with the same Poisson noise that the training dataset projections have. To do so, run the prediction script, which requires the path to the folder of noisy projections, the path to the folder of the corresponding noiseless ground truth for the evaluation and the path to the model file (.pth). The following command denoises the projection samples provided in [prediction_dataset](./prediction_dataset) using the fine-tuned [UNet model](./UNet_best.pth).
+Once a UNet model with is trained, we can use it to denoise unseen mouse projections with the same Poisson noise that the training dataset projections have. To do so, run the [predict script](./predict.py), which requires path to the folder of noisy projections, path to the folder of the corresponding noiseless ground truth for the evaluation and path to the trained model file (.pth). The following command denoises the projection samples provided in [prediction_dataset folder](./prediction_dataset) using a trained model.
 
 ```bash
 python predict.py --noisy ./prediction_dataset/noisy_projs --groundtruth ./prediction_dataset/groundtruth --model ./UNet_best.pth
@@ -273,7 +271,7 @@ The projections are normalized to the `[0, 1]` range, so these values are very s
 ---
 #### Example Output
 
-Below is a sample output of [predict.py](./predict.py). It shows the denoised projection of a mouse (second column) for both the low energy (top) and high energy (bottom) channels, along with the given noisy projection (first column), the ground truth projection which is noiseless (third column) and the absolute difference map (fourth column).
+Below is a sample output of [predict.py](./predict.py). It shows the denoised projection of a mouse (second column) for both the low energy (top row) and high energy (bottom row) channels, along with the given noisy projection (first column), the ground truth projection which is noiseless (third column) and the absolute difference map (fourth column).
 
 <p align="center">
   <img src="./sample_comparison.png" alt="Denoised Mouse Projection Example" width="100%"/>
