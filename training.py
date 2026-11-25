@@ -27,8 +27,8 @@ MAE_WEIGHT, SSIM_WEIGHT, GRADIENT_WEIGHT = 0.5, 0.25, 0.25
 
 # Data Augmentation Configuration
 USE_AUGMENTATION = True  # Enable/disable rotation and flip augmentation
-ROTATION_PROBABILITY = 0.2  # Probability of applying rotation to each training sample
-FLIP_PROBABILITY = 0.2 # Probability of applying horizontal and/or vertical flip to each training sample
+ROTATION_PROBABILITY = 0.25  # Probability of applying rotation to each training sample
+FLIP_PROBABILITY = 0.25 # Probability of applying horizontal and/or vertical flip to each training sample
 
 def parse_args():
     """Command-line arguments: the options that change from one run to the next."""
